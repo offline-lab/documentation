@@ -1,0 +1,323 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://offline-lab.com/schemas/package-yaml/v1",
+  "title": "Offline Lab package.yaml",
+  "description": "Build-time package definition. Written by the app author, read by buildctl, emitted as a DDI (UAPI.3 GPT image: root + verity + signature partitions). Supports dual runtime (portable default, or nspawn) and an optional rootfs/ skeleton merged over backend output. Fields not set here fall back to Docker image labels, then to defaults where applicable. See docs/specs/package-format.md and docs/specs/build.md.",
+  "type": "object",
+  "required": [
+    "spec_version",
+    "name",
+    "version",
+    "arch",
+    "description",
+    "publisher"
+  ],
+  "additionalProperties": false,
+  "properties": {
+
+    "spec_version": {
+      "type": "string",
+      "enum": ["1"],
+      "description": "Schema version. Always '1' for this version of the spec."
+    },
+
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "Package name. Lowercase alphanumeric and hyphens only. Must start with alphanumeric."
+    },
+
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
+      "description": "Package version. Must be valid semver."
+    },
+
+    "arch": {
+      "type": "string",
+      "enum": ["arm64", "armv7", "armv6", "amd64", "i386", "riscv64", "ppc64le", "s390x"],
+      "description": "Target architecture. Maps to a Docker platform string at build time (e.g. arm64 → linux/arm64, i386 → linux/386)."
+    },
+
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Single-line human-readable description."
+    },
+
+    "homepage": {
+      "type": "string",
+      "format": "uri",
+      "description": "Package or upstream project homepage URL."
+    },
+
+    "license": {
+      "type": "string",
+      "description": "SPDX license identifier (e.g. 'Apache-2.0', 'MIT', 'EPL-2.0')."
+    },
+
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "description": "Classification tags used for repository search and filtering."
+    },
+
+    "publisher": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Publisher organisation identifier."
+    },
+
+    "publisher_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "Publisher homepage URL."
+    },
+
+    "maintainer": {
+      "type": "string",
+      "description": "Package maintainer. Format: 'Name <email>'."
+    },
+
+    "source_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "Source repository URL."
+    },
+
+    "security_contact": {
+      "type": "string",
+      "description": "Email address or URL for vulnerability disclosure."
+    },
+
+    "sbom_url": {
+      "type": ["string", "null"],
+      "format": "uri",
+      "description": "URL to a published SBOM for this package. Null if not provided."
+    },
+
+    "backend": {
+      "type": "string",
+      "enum": ["docker", "shell", "make", "mkosi"],
+      "default": "docker",
+      "description": "Build backend used to produce the filesystem. 'docker' (default) uses docker buildx. See docs/specs/build.md."
+    },
+
+    "backend_arguments": {
+      "type": "object",
+      "description": "Backend-specific build arguments. Valid keys depend on the selected backend. Per-backend keys are defined when each backend is documented. See docs/specs/build.md.",
+      "additionalProperties": true
+    },
+
+    "systemd_profile": {
+      "type": "string",
+      "enum": ["default", "strict", "trusted", "nonetwork", "custom"],
+      "default": "strict",
+      "description": "systemd portable service security profile. Applies to portable runtime only. 'custom' shifts full security responsibility to the app author — flagged in appctl list and the repo index."
+    },
+
+    "runtime": {
+      "type": "string",
+      "enum": ["portable", "nspawn"],
+      "default": "portable",
+      "description": "Runtime mode. 'portable' (default) attaches the DDI as a systemd portable service with a per-app uid drop-in. 'nspawn' runs the DDI under systemd-nspawn with namespace isolation (no per-app uid)."
+    },
+
+    "network": {
+      "type": "string",
+      "enum": ["host", "private", "none"],
+      "default": "host",
+      "description": "Network mode. Only meaningful when runtime = 'nspawn'; ignored otherwise. 'host' shares the host network namespace, 'private' uses an isolated namespace, 'none' disables networking."
+    },
+
+    "command": {
+      "type": "string",
+      "description": "Absolute path to the service entrypoint inside the DDI root filesystem. Used to auto-generate the systemd service unit when no unit file is provided in rootfs/ or backend output. Ignored when a developer-provided unit is present."
+    },
+
+    "socket_activation": {
+      "type": "boolean",
+      "default": false,
+      "description": "If true, the service uses socket activation. A .socket unit must exist inside the DDI root partition."
+    },
+
+    "volumes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "config": {
+          "type": "string",
+          "description": "Namespace path for the config volume (e.g. /etc/mosquitto)."
+        },
+        "data": {
+          "type": "string",
+          "description": "Namespace path for the data volume (e.g. /var/lib/mosquitto)."
+        }
+      },
+      "description": "Persistent volume mappings. At most two keys: config and data. Apps log via stderr/stdout to the systemd journal — no log volume."
+    },
+
+    "ports": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/port" },
+      "default": [],
+      "description": "Network ports the service listens on."
+    },
+
+    "devices": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/device" },
+      "default": [],
+      "description": "Hardware devices the service requires or optionally uses."
+    },
+
+    "resources": {
+      "$ref": "#/definitions/resources",
+      "description": "Expected resource usage at three load levels. Optional — if absent, appctl skips the resource check with a warning."
+    },
+
+    "lifecycle": {
+      "$ref": "#/definitions/lifecycle",
+      "description": "Lifecycle hook unit names. Omit the entire block if the app has no hooks. If present, each defined key must be a non-empty unit name string."
+    },
+
+    "strip": {
+      "$ref": "#/definitions/strip",
+      "description": "Binary stripping configuration. Build-time only — not included in the generated metadata JSON."
+    }
+
+  },
+
+  "definitions": {
+
+    "port": {
+      "type": "object",
+      "required": ["port", "protocol", "expose"],
+      "additionalProperties": false,
+      "properties": {
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "protocol": {
+          "type": "string",
+          "enum": ["tcp", "udp"]
+        },
+        "description": {
+          "type": "string"
+        },
+        "expose": {
+          "type": "boolean",
+          "description": "If true, an nftables accept rule is applied for this port on install."
+        }
+      }
+    },
+
+    "device": {
+      "type": "object",
+      "required": ["type", "required"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["audio", "video", "bluetooth", "gpio", "i2c", "spi", "serial", "usb"]
+        },
+        "required": {
+          "type": "boolean",
+          "description": "If false, the service starts even if the device is absent."
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+
+    "resources": {
+      "type": "object",
+      "required": ["low", "moderate", "heavy"],
+      "additionalProperties": false,
+      "properties": {
+        "low":      { "$ref": "#/definitions/resource_level" },
+        "moderate": { "$ref": "#/definitions/resource_level" },
+        "heavy":    { "$ref": "#/definitions/resource_level" }
+      }
+    },
+
+    "resource_level": {
+      "type": "object",
+      "required": ["cpu_percent", "memory_mb", "storage_mb"],
+      "additionalProperties": false,
+      "properties": {
+        "cpu_percent": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Sustained CPU usage as a percentage of one core."
+        },
+        "memory_mb": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "RSS memory in MB."
+        },
+        "storage_mb": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Disk space in MB (squashfs + data dir combined)."
+        }
+      }
+    },
+
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "pre_start": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unit name to run after portablectl attach, before enable and first start."
+        },
+        "post_start": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unit name to run after the service is running for the first time."
+        },
+        "pre_update": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unit name to run after new image is attached, before service restart."
+        },
+        "post_update": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unit name to run after the service is running on the new image."
+        },
+        "pre_remove": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unit name to run before the service is stopped and the image is detached."
+        }
+      }
+    },
+
+    "strip": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, unused shared libraries are removed after build. Libraries loaded via dlopen are invisible to ldd — declare them in keep[]."
+        },
+        "keep": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "default": [],
+          "description": "Paths inside the rootfs to preserve during stripping."
+        }
+      }
+    }
+
+  }
+}

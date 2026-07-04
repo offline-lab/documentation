@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>service discovery — Offline Lab</title>
+  <meta name="description" content="Offline network discovery, hostname resolution, and time sync for disconnected networks." />
+  <link rel="icon" href="/images/offline-lab.ico" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/assets/site.css" />
+  <script>
+    (function () {
+      var s = localStorage.getItem('theme');
+      var d = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.setAttribute('data-theme', s || (d ? 'dark' : 'light'));
+    })();
+  </script>
+</head>
+<body>
+
+  <svg width="0" height="0" style="display:none" aria-hidden="true">
+    <defs>
+      <linearGradient id="ol-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" style="stop-color: var(--logo-grad-a, #f97316)"/>
+        <stop offset="100%" style="stop-color: var(--logo-grad-b, #fbbf24)"/>
+      </linearGradient>
+    </defs>
+  </svg>
+
+  <nav>
+    <div class="nav-inner">
+      <a class="nav-logo" href="/">
+        <svg class="nav-logo-icon" viewBox="-135 -150 270 270" fill="none">
+          <rect x="-135" y="-150" width="270" height="270" rx="27" ry="27" stroke="currentColor" stroke-width="6"/>
+          <g stroke="currentColor" stroke-width="7.5" stroke-linecap="round">
+            <path d="M-54,-63 A90,90 0 0,1 54,-63"/>
+            <path d="M-36,-42 A60,60 0 0,1 36,-42"/>
+            <path d="M-18,-24 A33,33 0 0,1 18,-24"/>
+          </g>
+          <circle cx="0" cy="-9" r="6.75" fill="currentColor"/>
+          <line x1="-69" y1="-78" x2="69" y2="6" stroke="currentColor" stroke-width="7.5" stroke-linecap="round"/>
+          <g transform="translate(0, 48)">
+            <rect x="-33" y="-33" width="66" height="66" rx="7.5" ry="7.5" stroke="currentColor" stroke-width="5.25"/>
+            <g stroke="currentColor" stroke-width="3.75" stroke-linecap="round">
+              <line x1="-15" y1="-33" x2="-15" y2="-45"/><line x1="0" y1="-33" x2="0" y2="-45"/>
+              <line x1="15" y1="-33" x2="15" y2="-45"/><line x1="-15" y1="33" x2="-15" y2="45"/>
+              <line x1="0" y1="33" x2="0" y2="45"/><line x1="15" y1="33" x2="15" y2="45"/>
+              <line x1="-33" y1="-15" x2="-45" y2="-15"/><line x1="-33" y1="0" x2="-45" y2="0"/>
+              <line x1="-33" y1="15" x2="-45" y2="15"/><line x1="33" y1="-15" x2="45" y2="-15"/>
+              <line x1="33" y1="0" x2="45" y2="0"/><line x1="33" y1="15" x2="45" y2="15"/>
+            </g>
+            <rect x="-13.5" y="-13.5" width="27" height="27" rx="3" ry="3" stroke="currentColor" stroke-width="3"/>
+          </g>
+        </svg>
+        Offline<span>Lab</span>
+      </a>
+      <div class="nav-links">
+        <a class="nav-link" href="/docs/">docs</a>
+        <a class="nav-link" href="https://github.com/offline-lab" target="_blank" rel="noopener">github</a>
+        <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"/>
+            <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+          </svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <section class="hero hero-component">
+    <div class="hero-inner">
+      <a class="back-link" href="/">← offline-lab.com</a>
+      <svg class="hero-logo" viewBox="-135 -150 270 270" fill="none">
+        <rect x="-135" y="-150" width="270" height="270" rx="27" ry="27" stroke="url(#ol-grad)" stroke-width="6"/>
+        <g stroke="url(#ol-grad)" stroke-width="7.5" stroke-linecap="round">
+          <path d="M-54,-63 A90,90 0 0,1 54,-63"/>
+          <path d="M-36,-42 A60,60 0 0,1 36,-42"/>
+          <path d="M-18,-24 A33,33 0 0,1 18,-24"/>
+        </g>
+        <circle cx="0" cy="-9" r="6.75" fill="url(#ol-grad)"/>
+        <line x1="-69" y1="-78" x2="69" y2="6" stroke="url(#ol-grad)" stroke-width="7.5" stroke-linecap="round"/>
+        <g transform="translate(0, 48)">
+          <rect x="-33" y="-33" width="66" height="66" rx="7.5" ry="7.5" stroke="url(#ol-grad)" stroke-width="5.25"/>
+          <g stroke="url(#ol-grad)" stroke-width="3.75" stroke-linecap="round">
+            <line x1="-15" y1="-33" x2="-15" y2="-45"/><line x1="0" y1="-33" x2="0" y2="-45"/>
+            <line x1="15" y1="-33" x2="15" y2="-45"/><line x1="-15" y1="33" x2="-15" y2="45"/>
+            <line x1="0" y1="33" x2="0" y2="45"/><line x1="15" y1="33" x2="15" y2="45"/>
+            <line x1="-33" y1="-15" x2="-45" y2="-15"/><line x1="-33" y1="0" x2="-45" y2="0"/>
+            <line x1="-33" y1="15" x2="-45" y2="15"/><line x1="33" y1="-15" x2="45" y2="-15"/>
+            <line x1="33" y1="0" x2="45" y2="0"/><line x1="33" y1="15" x2="45" y2="15"/>
+          </g>
+          <rect x="-13.5" y="-13.5" width="27" height="27" rx="3" ry="3" stroke="url(#ol-grad)" stroke-width="3"/>
+        </g>
+      </svg>
+      <div class="hero-badge">planned</div>
+      <h1><em>service discovery</em></h1>
+      <div class="hero-desc">
+        <p>Offline network discovery, hostname resolution, and time sync, designed for disconnected networks where there is no DNS server, no NTP server, and no router handing out names.</p>
+        <p>disco is the daemon that makes devices find each other by name on any local network, keeps clocks in sync, and integrates with NSS so hostnames resolve transparently without configuration.</p>
+      </div>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="https://offline-lab.com/docs/disco" target="_blank" rel="noopener">
+          <svg viewBox="0 0 16 16" fill="currentColor"><path d="M2 1a1 1 0 00-1 1v11a1 1 0 001 1h5v-2H3V3h4v3h3v1h2V5L9 2H2zm7 0L12 4H9V1z"/></svg>
+          website
+        </a>
+        <a class="btn btn-secondary" href="https://github.com/offline-lab/disco" target="_blank" rel="noopener">
+          <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 005.47 7.59c.4.07.55-.17.55-.38v-1.34c-2.23.49-2.7-1.07-2.7-1.07-.36-.92-.88-1.16-.88-1.16-.72-.5.06-.49.06-.49.8.06 1.22.82 1.22.82.71 1.21 1.86.86 2.32.66.07-.52.28-.86.5-1.06-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.58.82-2.14-.08-.2-.35-1.01.08-2.11 0 0 .67-.21 2.2.82A7.66 7.66 0 018 3.8c.68 0 1.36.09 2 .27 1.52-1.03 2.2-.82 2.2-.82.43 1.1.16 1.91.08 2.11.51.56.82 1.27.82 2.14 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.19c0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          github
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="footer-inner">
+      <span class="footer-logo">offline<span>-</span>lab.com</span>
+      <div class="footer-links">
+        <a class="footer-link" href="/">home</a>
+        <a class="footer-link" href="/docs/">docs</a>
+        <a class="footer-link" href="https://github.com/offline-lab" target="_blank" rel="noopener">github</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    function toggleTheme() {
+      var c = document.documentElement.getAttribute('data-theme');
+      var n = c === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', n);
+      localStorage.setItem('theme', n);
+    }
+  </script>
+
+</body>
+</html>

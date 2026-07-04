@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Roadmap — Offline Lab</title>
+  <meta name="description" content="Where Offline Lab is going — a simple timeline of what we're building and when." />
+  <link rel="icon" href="/images/offline-lab.ico" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/assets/site.css" />
+  <script>
+    (function () {
+      var s = localStorage.getItem('theme');
+      var d = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.setAttribute('data-theme', s || (d ? 'dark' : 'light'));
+    })();
+  </script>
+</head>
+<body>
+
+  <svg width="0" height="0" style="display:none" aria-hidden="true">
+    <defs>
+      <linearGradient id="ol-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" style="stop-color: var(--logo-grad-a, #f97316)"/>
+        <stop offset="100%" style="stop-color: var(--logo-grad-b, #fbbf24)"/>
+      </linearGradient>
+    </defs>
+  </svg>
+
+  <nav>
+    <div class="nav-inner">
+      <a class="nav-logo" href="/">
+        <svg class="nav-logo-icon" viewBox="-135 -150 270 270" fill="none">
+          <rect x="-135" y="-150" width="270" height="270" rx="27" ry="27" stroke="currentColor" stroke-width="6"/>
+          <g stroke="currentColor" stroke-width="7.5" stroke-linecap="round">
+            <path d="M-54,-63 A90,90 0 0,1 54,-63"/>
+            <path d="M-36,-42 A60,60 0 0,1 36,-42"/>
+            <path d="M-18,-24 A33,33 0 0,1 18,-24"/>
+          </g>
+          <circle cx="0" cy="-9" r="6.75" fill="currentColor"/>
+          <line x1="-69" y1="-78" x2="69" y2="6" stroke="currentColor" stroke-width="7.5" stroke-linecap="round"/>
+          <g transform="translate(0, 48)">
+            <rect x="-33" y="-33" width="66" height="66" rx="7.5" ry="7.5" stroke="currentColor" stroke-width="5.25"/>
+            <g stroke="currentColor" stroke-width="3.75" stroke-linecap="round">
+              <line x1="-15" y1="-33" x2="-15" y2="-45"/><line x1="0" y1="-33" x2="0" y2="-45"/>
+              <line x1="15" y1="-33" x2="15" y2="-45"/><line x1="-15" y1="33" x2="-15" y2="45"/>
+              <line x1="0" y1="33" x2="0" y2="45"/><line x1="15" y1="33" x2="15" y2="45"/>
+              <line x1="-33" y1="-15" x2="-45" y2="-15"/><line x1="-33" y1="0" x2="-45" y2="0"/>
+              <line x1="-33" y1="15" x2="-45" y2="15"/><line x1="33" y1="-15" x2="45" y2="-15"/>
+              <line x1="33" y1="0" x2="45" y2="0"/><line x1="33" y1="15" x2="45" y2="15"/>
+            </g>
+            <rect x="-13.5" y="-13.5" width="27" height="27" rx="3" ry="3" stroke="currentColor" stroke-width="3"/>
+          </g>
+        </svg>
+        Offline<span>Lab</span>
+      </a>
+      <div class="nav-links">
+        <a class="nav-link" href="/docs/">docs</a>
+        <a class="nav-link" href="https://github.com/offline-lab" target="_blank" rel="noopener">github</a>
+        <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"/>
+            <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+          </svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <section class="hero hero-component">
+    <div class="hero-inner">
+      <a class="back-link" href="/">← offline-lab.com</a>
+      <div class="hero-badge">early development</div>
+      <h1>The <em>roadmap</em></h1>
+      <div class="hero-desc">
+        <p>Offline Lab is being built in phases. Each phase delivers something useful on its own, and each one builds on the last.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-inner">
+      <div class="phases">
+
+        <div class="phase">
+          <div class="phase-dot current"></div>
+          <div class="phase-content">
+            <div class="phase-title">Phase 1 — Offline Lab OS</div>
+            <p class="phase-desc">The read-only operating system. A minimal Linux image built on Buildroot, running on Raspberry Pi Zero 2W, Pi 3, Pi 4, and QEMU. Immutable root, A/B partition OTA updates, systemd as the only service manager. This is the foundation everything else runs on.</p>
+            <div class="phase-links">
+              <a class="phase-link" href="/operating-system/">OS →</a>
+              <a class="phase-link" href="/boxctl/">boxctl →</a>
+              <a class="phase-link" href="/docs/">docs →</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="phase">
+          <div class="phase-dot"></div>
+          <div class="phase-content">
+            <div class="phase-title">Phase 2 — App format + buildctl</div>
+            <p class="phase-desc">The portable service format and the toolchain for building packages. Define the spec for what an app looks like, how it's built and signed, and how it gets distributed, with or without internet. buildctl runs on the developer machine and handles the full build, sign, and publish workflow.</p>
+            <div class="phase-links">
+              <a class="phase-link" href="/buildctl/">buildctl →</a>
+              <a class="phase-link" href="/repository/">repository →</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="phase">
+          <div class="phase-dot"></div>
+          <div class="phase-content">
+            <div class="phase-title">Phase 3 — appctl + service discovery</div>
+            <p class="phase-desc">On-device app management and network presence. appctl handles the full app lifecycle: install, start, stop, update, remove. Service discovery lets devices find each other by name on any local network, without needing a DNS server or internet connection.</p>
+            <div class="phase-links">
+              <a class="phase-link" href="/appctl/">appctl →</a>
+              <a class="phase-link" href="/service-discovery/">service discovery →</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="phase">
+          <div class="phase-dot"></div>
+          <div class="phase-content">
+            <div class="phase-title">Phase 4 — Services + data sync</div>
+            <p class="phase-desc">The first real apps: music, books, maps, and others. A data sync layer to keep collections consistent across multiple nodes and pull updated datasets on a schedule, without relying on a central server.</p>
+            <div class="phase-links">
+              <a class="phase-link" href="/repository/">repository →</a>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="footer-inner">
+      <span class="footer-logo">offline<span>-</span>lab.com</span>
+      <div class="footer-links">
+        <a class="footer-link" href="/">home</a>
+        <a class="footer-link" href="/docs/">docs</a>
+        <a class="footer-link" href="https://github.com/offline-lab" target="_blank" rel="noopener">github</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    function toggleTheme() {
+      var c = document.documentElement.getAttribute('data-theme');
+      var n = c === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', n);
+      localStorage.setItem('theme', n);
+    }
+  </script>
+
+</body>
+</html>

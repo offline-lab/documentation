@@ -1,0 +1,127 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://offline-lab.com/schemas/repo-index-arch/v1",
+  "title": "Offline Lab Per-Arch Package Index",
+  "description": "packages/<arch>/index.json — one entry per package (latest version only). Signed with the repo's index key. Devices download only the index for their arch. Each entry points at a DDI (.raw) and its metadata JSON; both must resolve to the same origin as the repo base_url (same-server rule). See docs/specs/repository.md.",
+  "type": "object",
+  "required": [
+    "spec_version",
+    "arch",
+    "updated_at",
+    "packages"
+  ],
+  "additionalProperties": false,
+  "properties": {
+
+    "spec_version": {
+      "type": "string",
+      "enum": ["1"],
+      "description": "Schema version. Always '1' for this version of the spec."
+    },
+
+    "arch": {
+      "type": "string",
+      "enum": ["arm64", "armv7", "armv6", "amd64"],
+      "description": "Architecture this index covers."
+    },
+
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of the last update."
+    },
+
+    "key_rotation": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Incremented on each option B key rotation. appctl re-verifies all installed packages from this repo when the counter increases."
+    },
+
+    "packages": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/package_entry" },
+      "description": "One entry per package name. Latest published version only. Version history is a client-side concern."
+    }
+
+  },
+
+  "definitions": {
+
+    "package_entry": {
+      "type": "object",
+      "required": [
+        "name",
+        "version",
+        "description",
+        "ddi_size",
+        "ddi_sha256",
+        "signing_key_id",
+        "raw_url",
+        "metadata_url"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "description": "Package name."
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
+          "description": "Package version. Semver."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Single-line human-readable description."
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true,
+          "description": "Classification tags. Used for appctl search."
+        },
+        "runtime": {
+          "type": "string",
+          "enum": ["portable", "nspawn"],
+          "default": "portable",
+          "description": "Runtime mode. Mirrors package.yaml so appctl search can display it without downloading metadata. Defaults to 'portable' when omitted."
+        },
+        "ddi_size": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Size of the DDI .raw file in bytes. Used for the pre-install storage check."
+        },
+        "ddi_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 of the DDI .raw file, lowercase hex."
+        },
+        "signing_key_id": {
+          "type": "string",
+          "description": "SHA-256 fingerprint (hex) of the build key that signed this package's DDI signature partition. appctl looks up the matching cert under /etc/verity.d/ to verify at install time."
+        },
+        "custom_profile": {
+          "type": "boolean",
+          "default": false,
+          "description": "True if the package uses systemd_profile: custom. Flagged in appctl list output."
+        },
+        "raw_url": {
+          "type": "string",
+          "description": "Relative URL to the DDI .raw file (<name>_<version>_<arch>.raw). Relative to repo base_url; must resolve to the same origin (same-server rule)."
+        },
+        "metadata_url": {
+          "type": "string",
+          "description": "Relative URL to the package metadata JSON file. Relative to repo base_url; must resolve to the same origin (same-server rule)."
+        },
+        "zip_url": {
+          "type": "string",
+          "description": "Optional relative URL to a transport zip bundling the DDI .raw and metadata .json. Relative to repo base_url. raw_url + metadata_url are the canonical references."
+        }
+      }
+    }
+
+  }
+}

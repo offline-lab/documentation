@@ -1,0 +1,241 @@
+# Offline Lab — unified documentation
+#
+# One config builds the whole site. Documentation is organised as distinct
+# top-level sections (one per project / tool) so each project keeps its own
+# identity in the navigation without being blended into a single tree.
+#
+# Layout:
+#   docs/   -> markdown source (one subdir per section)
+#   site/   -> hand-written website HTML (copied to the web root at build)
+#   public/ -> generated output (gitignored); docs render under public/docs/
+
+[project]
+
+site_name        = "Offline Lab"
+site_description = "Open tools for offline and air-gapped computing environments."
+site_author      = "Offline Lab"
+site_url         = "https://offline-lab.com/docs/"
+home_page_url    = "https://offline-lab.com"
+
+copyright = "Copyright &copy; 2026 Offline Lab"
+
+repo_name = "offline-lab/documentation"
+repo_url  = "https://github.com/offline-lab/documentation"
+edit_uri  = "https://github.com/offline-lab/documentation/edit/main/docs/"
+
+docs_dir = "docs"
+site_dir = "public/docs"
+
+# Each top-level entry is a self-contained documentation section.
+# `navigation.sections` + `navigation.indexes` render these as distinct
+# section groups, each anchored on its own index page.
+nav = [
+  { "Offline Lab OS" = [
+    { "Home" = "index.md" },
+    { "About" = "about.md" },
+    { "Getting started" = "getting-started.md" },
+    { "How-to guides" = [
+      { "Install Offline Lab OS" = "burn-image.md" },
+      { "Build the OS image" = "build-image.md" },
+    ]},
+    { "Reference" = [
+      { "Hardware" = "hardware.md" },
+      { "Operating system" = "operating-system.md" },
+      { "Kernel" = "kernel.md" },
+      { "Boot" = "boot.md" },
+      { "Configuration" = "configuration.md" },
+      { "Boot partition config" = "bootfs-config.md" },
+      { "Packages" = "packages.md" },
+      { "Service model" = "components.md" },
+      { "App format" = "app-format.md" },
+      { "App filesystem layout" = "app-filesystem.md" },
+      { "Terminology" = "terminology.md" },
+    ]},
+    { "Specifications" = [
+      { "Package format" = "specs/package-format.md" },
+      { "Repository" = "specs/repository.md" },
+      { "Build" = "specs/build.md" },
+      { "Lifecycle hooks" = "specs/lifecycle.md" },
+      { "Security model" = "specs/security-model.md" },
+      { "User allocation" = "specs/user-allocation.md" },
+      { "Resource tracking" = "specs/resource-tracking.md" },
+      { "System extensions" = "specs/sysext.md" },
+      { "Schemas" = "schemas.md" },
+    ]},
+    { "Contributing" = [
+      { "How to contribute" = "contributing.md" },
+      { "Development guide" = "development.md" },
+      { "Style guide" = "styleguide.md" },
+    ]},
+  ]},
+
+  { "appctl" = [
+    { "Overview" = "appctl/index.md" },
+  ]},
+
+  { "bootconf" = [
+    { "Overview" = "bootconf/index.md" },
+    { "Getting started" = "bootconf/getting-started.md" },
+    { "Configuration" = "bootconf/configuration.md" },
+    { "Modules" = [
+      { "System" = "bootconf/modules/system.md" },
+      { "SSH" = "bootconf/modules/ssh.md" },
+      { "WiFi" = "bootconf/modules/wifi.md" },
+      { "Services" = "bootconf/modules/services.md" },
+      { "Users" = "bootconf/modules/users.md" },
+      { "Files" = "bootconf/modules/files.md" },
+      { "Templates" = "bootconf/modules/templates.md" },
+      { "Shell" = "bootconf/modules/shell.md" },
+      { "UnitRun" = "bootconf/modules/unitrun.md" },
+    ]},
+  ]},
+
+  { "buildctl" = [
+    { "Overview" = "buildctl/index.md" },
+    { "Install" = "buildctl/install.md" },
+    { "Tutorials" = [
+      { "Build your first package" = "buildctl/tutorials/first-package.md" },
+    ]},
+    { "How-to guides" = [
+      { "Build a package" = "buildctl/how-to/build.md" },
+      { "Cross-compile" = "buildctl/how-to/cross-compile.md" },
+      { "Customize the rootfs" = "buildctl/how-to/customize-rootfs.md" },
+      { "Validate a built DDI" = "buildctl/how-to/validate.md" },
+      { "Publish to a repository" = "buildctl/how-to/publish.md" },
+    ]},
+    { "Reference" = [
+      { "Commands" = "buildctl/reference/commands.md" },
+      { "package.yaml fields" = "buildctl/reference/package-yaml.md" },
+      { "Build backends" = "buildctl/reference/backends.md" },
+      { "DDI output and metadata" = "buildctl/reference/ddi-output.md" },
+      { "Repository index format" = "buildctl/reference/repo-index.md" },
+    ]},
+    { "Explanation" = [
+      { "Architecture and build pipeline" = "buildctl/explanation/architecture.md" },
+      { "Signing and trust model" = "buildctl/explanation/signing.md" },
+    ]},
+  ]},
+
+  { "disco" = [
+    { "Overview" = "disco/index.md" },
+    { "Getting started" = "disco/getting-started.md" },
+    { "Installation" = "disco/installation.md" },
+    { "Configuration" = "disco/configuration.md" },
+    { "CLI reference" = "disco/cli.md" },
+    { "NSS module" = "disco/nss.md" },
+    { "How-to" = [
+      { "Enable DNS" = "disco/how-to/dns.md" },
+      { "Enable security" = "disco/how-to/security.md" },
+      { "Time sync" = "disco/how-to/time-sync.md" },
+      { "GPS broadcaster" = "disco/how-to/gps-broadcaster.md" },
+      { "Static hosts" = "disco/how-to/static-hosts.md" },
+    ]},
+    { "Architecture" = "disco/architecture.md" },
+  ]},
+
+  { "framework" = [
+    { "Overview" = "framework/index.md" },
+    { "boxctl" = [
+      { "Overview" = "framework/commands.md" },
+      { "clock" = "framework/boxctl/clock.md" },
+      { "config" = "framework/boxctl/config.md" },
+      { "confext" = "framework/boxctl/confext.md" },
+      { "diagnose" = "framework/boxctl/diagnose.md" },
+      { "firewall" = "framework/boxctl/firewall.md" },
+      { "logs" = "framework/boxctl/logs.md" },
+      { "net" = "framework/boxctl/net.md" },
+      { "power" = "framework/boxctl/power.md" },
+      { "reboot" = "framework/boxctl/reboot.md" },
+      { "rollback" = "framework/boxctl/rollback.md" },
+      { "screen" = "framework/boxctl/screen.md" },
+      { "service" = "framework/boxctl/service.md" },
+      { "status" = "framework/boxctl/status.md" },
+      { "sysext" = "framework/boxctl/sysext.md" },
+      { "tools" = "framework/boxctl/tools.md" },
+      { "update" = "framework/boxctl/update.md" },
+    ]},
+    { "Reference" = [
+      { "Variables" = "framework/var.md" },
+      { "Strings" = "framework/string.md" },
+      { "Arrays" = "framework/array.md" },
+      { "Arguments" = "framework/arguments.md" },
+      { "Filesystem" = "framework/fs.md" },
+      { "Files" = "framework/files.md" },
+      { "Network" = "framework/net.md" },
+      { "WiFi" = "framework/wifi.md" },
+      { "SSH" = "framework/ssh.md" },
+      { "SSL" = "framework/ssl.md" },
+      { "Process" = "framework/proc.md" },
+      { "Dependencies" = "framework/depends.md" },
+      { "Cache" = "framework/cache.md" },
+      { "Time" = "framework/time.md" },
+      { "Credentials" = "framework/credentials.md" },
+      { "Interaction" = "framework/interact.md" },
+      { "Prettytable" = "framework/prettytable.md" },
+      { "System" = "framework/system.md" },
+      { "Config" = "framework/config.md" },
+      { "Clock" = "framework/clock.md" },
+      { "Resources" = "framework/resources.md" },
+      { "Zram" = "framework/zram.md" },
+      { "Firewall" = "framework/fw.md" },
+      { "Sysext" = "framework/sysext.md" },
+      { "Confext" = "framework/confext.md" },
+      { "Health" = "framework/health.md" },
+      { "Power" = "framework/power.md" },
+      { "RAUC" = "framework/rauc.md" },
+    ]},
+    { "Internals" = [
+      { "Core" = "framework/core.md" },
+      { "Import" = "framework/import.md" },
+      { "Logging" = "framework/logging.md" },
+      { "Exit" = "framework/exit.md" },
+      { "Debug" = "framework/debug.md" },
+      { "Sanity" = "framework/sanity.md" },
+    ]},
+  ]},]
+
+[project.theme]
+language   = "en"
+custom_dir = "docs/overrides"
+features = [
+    "content.code.copy",
+    "content.tooltips",
+    "navigation.footer",
+    "navigation.indexes",
+    "navigation.instant",
+    "navigation.instant.prefetch",
+    "navigation.path",
+    "navigation.sections",
+    "navigation.top",
+    "navigation.tracking",
+    "search.highlight",
+    "announce.dismiss",
+]
+
+[[project.theme.palette]]
+scheme      = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme      = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/offline-lab"
+
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.attr_list]
+[project.markdown_extensions.def_list]
+[project.markdown_extensions.toc]
+permalink = true
+[project.markdown_extensions.pymdownx.betterem]
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums   = true
+line_spans        = "__span"
+pygments_lang_class = true
+[project.markdown_extensions.pymdownx.superfences]
+[project.markdown_extensions.pymdownx.tasklist]
+custom_checkbox = true

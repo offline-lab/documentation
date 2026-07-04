@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://offline-lab.com/schemas/resources/v1",
+  "title": "Offline Lab Host Resource Baseline",
+  "description": "Format of /var/lib/appctl/resources.json. Written at boot by offlinelab-resources.service. Used by appctl for pre-install capacity checks. On Offline Lab OS this standard FHS path is bind-mounted from persistent /data/ storage. See docs/specs/resource-tracking.md.",
+  "type": "object",
+  "required": [
+    "total_memory_mb",
+    "total_storage_mb",
+    "cpu_cores",
+    "baseline_memory_mb",
+    "baseline_cpu_percent",
+    "measured_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+
+    "total_memory_mb": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Total RAM in MB from /proc/meminfo MemTotal."
+    },
+
+    "total_storage_mb": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Total size of the appctl storage partition in MB (the partition backing /var/lib/appctl/; physically /data on Offline Lab OS)."
+    },
+
+    "cpu_cores": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of online CPUs from /sys/devices/system/cpu/online."
+    },
+
+    "baseline_memory_mb": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Average RSS of all running processes sampled over 10 seconds at boot. Includes the base OS and all auto-start apps already installed."
+    },
+
+    "baseline_cpu_percent": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Average CPU usage sampled over 10 seconds at boot, normalised to one core (percent). Includes the base OS and all auto-start apps already installed."
+    },
+
+    "measured_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of when the measurement was taken."
+    }
+
+  }
+}
