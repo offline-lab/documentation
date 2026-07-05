@@ -1,0 +1,85 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://offline-lab.com/schemas/index-manifest/v1",
+  "title": "Offline Lab index manifest",
+  "description": "The root manifest of an index (proposed filename: index.json — index contract, open item 1), signed by the index key (index.json.p7s). Identity = the index KEY, never the URL (ADR-0033). The signature provides catalog integrity and anti-freeze for subscribers — NEVER trust; trust rides the build signatures inside the DDIs (ADR-0037). Every index is always signed, including a device's local collection.",
+  "type": "object",
+  "required": ["spec_version", "name", "classes", "keys", "version", "published_at"],
+  "additionalProperties": false,
+  "properties": {
+
+    "spec_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "description": "Index contract version, major.minor (session §24). Current: '1.0'."
+    },
+
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable display name of the index. The consumer's local alias (used in `get <alias>/<name>`) is chosen at `index trust` and is NOT this field."
+    },
+
+    "classes": {
+      "type": "object",
+      "description": "Which artifact classes this index serves, with their RELATIVE paths (all internal references are relative so a verbatim copy works at any location).",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "apps":  { "type": "string", "description": "Relative path of the apps class (functional images devs ship).", "pattern": "^(?!/)(?!.*://).*$" },
+        "bases": { "type": "string", "description": "Relative path of the bases class.", "pattern": "^(?!/)(?!.*://).*$" }
+      }
+    },
+
+    "keys": {
+      "type": "array",
+      "minItems": 1,
+      "description": "All certs this index distributes. Roles are POSITIONAL in this list (Q-B5: certs carry no markings). The build-cert entries are a cert-DISTRIBUTION convenience pinned at `index trust` — not a trust root (ADR-0037, delegation demoted).",
+      "items": {
+        "type": "object",
+        "required": ["key_id", "role", "cert_path", "active"],
+        "additionalProperties": false,
+        "properties": {
+          "key_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "SHA-256 of the DER-encoded certificate, lowercase hex."
+          },
+          "role": {
+            "type": "string",
+            "enum": ["index", "build"],
+            "description": "index = this index's identity key; build = a builder cert this index distributes."
+          },
+          "cert_path": {
+            "type": "string",
+            "pattern": "^(?!/)(?!.*://).*$",
+            "description": "Relative path to the PEM cert (conventionally keys/<fingerprint>.crt)."
+          },
+          "active": {
+            "type": "boolean",
+            "description": "False during rotation wind-down (ADR-0007 gradual multi-cert)."
+          }
+        }
+      }
+    },
+
+    "key_rotation": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Monotonic counter bumped on key-set changes (ADR-0007). Subscribers detect rotation via this."
+    },
+
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Monotonic index version, bumped on every publish. Anti-rollback for SUBSCRIPTIONS only (imports consume no foreign catalog). Must move together with published_at — any disagreement means the consumer bails (session §20/§21)."
+    },
+
+    "published_at": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Unixtime set at signing (signing IS publishing — the index is files). Cross-checked against version: equal version with different timestamp, newer version with older timestamp, or older version with newer timestamp are all refused. Doubles as the human staleness display."
+    }
+  }
+}

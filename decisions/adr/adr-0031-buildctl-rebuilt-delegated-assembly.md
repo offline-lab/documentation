@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted |
+| **Status** | Accepted — amended by ADR-0039 (2026-07-05): the `index` verbs move to the (unnamed) distribute tool; buildctl is build+sign only. The index-verb *semantics* defined here transfer unchanged |
 | **Date** | 2026-07-05 |
 | **Deciders** | Offline Lab core team |
 | **Supersedes** | ADR-0024, ADR-0027 (deprecates ADR-0018, ADR-0019) |

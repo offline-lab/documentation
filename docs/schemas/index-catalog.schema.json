@@ -1,0 +1,117 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://offline-lab.com/schemas/index-catalog/v1",
+  "title": "Offline Lab per-arch catalog",
+  "description": "One catalog per class per arch (proposed filename: <class>/<arch>/catalog.json — index contract, open item 1), signed by the index key. Lists the LATEST version of each name only (UAPI.10 maximum; no downgrade-via-get). Every entry field is a read-optimized PROJECTION of the verified embedded manifest, extracted once at `index add` (ADR-0038) — search and resolution never open DDIs.",
+  "type": "object",
+  "required": ["spec_version", "type", "arch", "version", "published_at", "entries"],
+  "additionalProperties": false,
+  "properties": {
+
+    "spec_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "description": "Index contract version, major.minor (session §24). Current: '1.0'."
+    },
+
+    "type": {
+      "type": "string",
+      "enum": ["apps", "bases"],
+      "description": "Artifact class guard — prevents class confusion between apps (functional images) and bases."
+    },
+
+    "arch": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "The architecture this catalog serves (open set)."
+    },
+
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Monotonic, bumped together with the manifest's version on every publish; same cross-check/bail rules (a half-copied index — new manifest, old catalog — must trip the consumer)."
+    },
+
+    "published_at": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Unixtime at signing; cross-checked against version."
+    },
+
+    "entries": {
+      "type": "array",
+      "description": "One entry per name — latest version only.",
+      "items": {
+        "type": "object",
+        "required": ["name", "version", "arch", "path", "sha256", "size", "signing_key_id", "added_at"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "App/base name, from the verified embedded manifest (filenames are untrusted)."
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9.~^-]+$",
+            "description": "The DDI version (UAPI.10). Inner software versions are untracked by design (T106 parked)."
+          },
+          "arch": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Matches the catalog's arch."
+          },
+          "path": {
+            "type": "string",
+            "pattern": "^(?!/)(?!.*://).*$",
+            "description": "Relative path to the single .raw (there is no metadata file and no zip — ADR-0038)."
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "SHA-256 of the .raw — the subscription get-gate's download-integrity anchor."
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Size of the .raw in bytes (pre-download space checks)."
+          },
+          "signing_key_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "Fingerprint of the build cert that signed this DDI (which trust-store entry the up-gate will use)."
+          },
+          "added_at": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Unixtime this DDI was published into THIS index (the second signing moment: DDI signed at build, index at publish — session §21). The DDI's own build time lives in its embedded manifest."
+          },
+          "runtime": {
+            "type": "string",
+            "enum": ["portable", "nspawn"],
+            "description": "Projected from the manifest. Present for apps; absent for bases (bases are never run alone)."
+          },
+          "base": {
+            "type": "object",
+            "description": "Lineage projection — what `get` uses to resolve the closure without opening the DDI. Present only for layered apps.",
+            "required": ["name", "sysext_level"],
+            "additionalProperties": false,
+            "properties": {
+              "name":         { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+              "sysext_level": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" }
+            }
+          },
+          "sysext_level": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]*$",
+            "description": "For BASES only: the compatibility level this base provides (what app `base:` declarations match against)."
+          },
+          "description": {
+            "type": "string",
+            "description": "Projected search text — `search` is index-file text matching only (apt/helm model, session §21)."
+          }
+        }
+      }
+    }
+  }
+}

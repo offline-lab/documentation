@@ -90,7 +90,7 @@ beyond the per-file atomic rename.
 | `url` | string | Repo base URL (the URL passed to `repo add`). Immutable. |
 | `alias` | string | Human-readable name set by operator. Display-only. |
 | `arch` | string | Device arch; which per-arch index to fetch. |
-| `status` | enum | `"active"` \| `"paused"` \| `"blocked"`. See [Security Model](../specs/security-model.md#repo-status-and-blocklist). |
+| `status` | enum | `"active"` \| `"paused"` \| `"blocked"`. *(Pre-pivot design; whether pause/block survives the ADR-0037 subscribe/import model is a rewrite question for this page.)* |
 | `bases_url` | URL \| null | Resolved bases URL from `repository.json`. `null` if repo doesn't serve bases. |
 | `images_url` | URL \| null | Resolved apps URL from `repository.json`. `null` if repo doesn't serve apps. |
 | `index_cert_path` | path | Public cert used to verify `repository.json.p7s` and per-arch `index.json.p7s` files. |

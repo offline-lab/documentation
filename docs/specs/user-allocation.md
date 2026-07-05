@@ -1,256 +1,126 @@
 # Per-App User Allocation and Storage Layout
 
-> **Amended (2026-07-05).** Per
-> [ADR-0035](https://github.com/offline-lab/documentation/blob/main/decisions/adr/adr-0035-standardized-app-storage.md)
-> and [ADR-0036](https://github.com/offline-lab/documentation/blob/main/decisions/adr/adr-0036-foreign-host-baseline.md):
-> the storage layout is the contract-defined, relocatable
-> `<root>/apps/<index-hash>/<app>/{config,data}` (+ private `/tmp`); the uid
-> base range is **configurable** (default 6000+) and appctl **errors loudly on
-> a clash** with foreign users (no silent skipping); `appctl recover` recreates
-> users with recorded uids so data never needs a chown.
+**Status:** rewritten 2026-07-05 against ADR-0032/0035/0036/0037 (T98).
 
-Every installed app running in **portable mode** runs as a dedicated system user. No
-two apps share a uid or gid. appctl owns all allocation; no users are pre-created in
-the base image.
+Every app running in **portable mode** runs as a dedicated system user. No
+two apps ever share a uid or gid. The runtime owns all allocation; no users
+are pre-created in any image.
 
-**nspawn mode** does not allocate a per-app uid. Isolation is via PID/mount/network
-namespace, and the user inside the container is root. Everything below applies to
-portable mode only.
+**nspawn mode** allocates no per-app uid — isolation comes from the
+namespace, and the user inside the container is root. Everything below
+applies to portable mode only.
 
 ---
 
 ## Identity scheme
 
-Three distinct identifiers per app, each serving a different purpose:
-
 | Identifier | Format | Example | Purpose |
 |---|---|---|---|
-| Repo hash | `sha1(url.lower())[:8]` | `a0d7b954` | Storage path prefix, collision-resistant |
-| Username | `app<uid>` | `app6000` | Linux user account, always valid, always short |
-| Display name | `<repo-alias>/<name>` | `offline-lab/mosquitto` | Human-readable, `appctl list` output |
+| Index hash | truncated **index-key fingerprint** (ADR-0033/0035) | `a0d7b954` | storage path prefix; ties data to provenance |
+| Username | `app<uid>` | `app6000` | Linux account — always valid, short, busybox-safe |
+| Display name | `<index-alias>/<name>` | `offline-lab/mosquitto` | human-readable (`list` output, GECOS field) |
 
-**Repo hash** is derived from the canonical repo URL at `appctl repo add` time:
-`sha1("https://packages.offline-lab.com".lower())[:8]` yields `a0d7b954`. It is
-immutable and cannot be manipulated: `/a/b/repo` and `/ab/repo` hash to different
-8-char prefixes. Same approach as Home Assistant Supervisor.
-
-**Username** is `app` followed by the decimal uid. Always starts with a letter,
-always alphanumeric, always ≤ 9 chars. Works on busybox and all Linux systems.
-The GECOS field carries the human-readable identity (`offline-lab/mosquitto`).
-
-**Display name** uses the user-set repo alias (set at `appctl repo add --name <alias>`)
-for readability. The alias is display-only; the repo hash is the canonical identifier.
-
----
+The index hash derives from the **identity of the index that provided the
+app** — its signing-key fingerprint, not its URL (identity is the key;
+URLs are just locations). Apps imported from raw DDIs belong to the
+device's **own local index** (ADR-0037), so every app has an index hash.
+Exact truncation length is fixed by the schemas (T95).
 
 ## Storage layout
 
 ```
-/var/lib/appctl/apps/<repo-hash>/<name>/
-  config/    ← app configuration (persistent, writable by app uid)
-  data/      ← app runtime data  (persistent, writable by app uid)
+<root>/apps/<index-hash>/<name>/
+  config/    ← operator-editable, writable by the app uid
+  data/      ← app-private persistent data, writable by the app uid
 ```
 
-Example:
-```
-/var/lib/appctl/apps/a0d7b954/mosquitto/config/
-/var/lib/appctl/apps/a0d7b954/mosquitto/data/
-```
+`<root>` is relocatable (default `/var/lib/appctl`); the structure below it
+is fixed contract on every host OS (ADR-0035). Two same-named apps from
+different indexes are fully isolated — different hash, different uid,
+different storage.
 
-Two apps named `mosquitto` from different repos are fully isolated:
-```
-/var/lib/appctl/apps/a0d7b954/mosquitto/   ← offline-lab repo
-/var/lib/appctl/apps/f2c91e3a/mosquitto/   ← community repo, separate hash, separate uid
-```
+Inside the app's namespace these mount at the fixed UAPI.9 paths —
+**config → `/etc/<name>`, data → `/var/lib/<name>`** — via `BindPaths=` in
+the generated drop-in. The in-image paths are not author-declared;
+software expecting a different path is adapted with symlinks inside the
+image. (Whether an override field survives at all is part of T101's
+orphaned-fields ruling.)
 
----
-
-## File permissions inside the squashfs
-
-The squashfs is read-only (dm-verity enforced). Ownership inside it only affects
-whether the service process can read or execute files, not write them.
-
-**Decision: all files inside the squashfs are owned by root (uid 0).**
-
-- Binaries: `root:root 755` (world-executable)
-- Static files and config templates: `root:root 644` (world-readable)
-- No files inside the squashfs need to be owned by the service user
-
-The service user (`app6000`) can read and execute these files via world permissions,
-exactly as any user can execute `/usr/bin/mosquitto` on a normal Linux system.
-
-**Why not use the app uid inside the squashfs:**
-The uid is allocated at install time and is not known at build time. There is no
-mechanism to specify it in the image. Attempting to use a placeholder uid and remap
-at runtime (via `UIDMap=`) adds complexity and requires user namespace kernel support,
-with no practical benefit for a read-only filesystem.
-
-**Packaging constraints (must be documented in app-filesystem.md):**
-
-1. Unit files inside the squashfs must not include `User=` or `Group=` directives.
-   appctl generates these in a drop-in at install time. If present in the unit file,
-   they are overridden by the drop-in, but their presence is misleading and buildctl
-   should warn.
-
-2. Services must not perform internal privilege dropping (calling `setuid()` or
-   `setgid()` to a named user defined in the squashfs's own `/etc/passwd`). The
-   service must run as the single user systemd assigns via `User=`. Upstream daemons
-   that drop privileges internally must have this disabled in the Dockerfile/package
-   (typically via a `--no-drop-privs` flag or equivalent).
-
-3. Any file that needs to be writable at runtime must be in the bind-mounted
-   `/var/lib/appctl/apps/<hash>/<name>/` tree, not inside the squashfs.
-
----
-
-## Writable storage: volumes
-
-Package authors declare only the namespace target paths for each data category.
-Exactly two fixed keys: `config` and `data`. No freeform paths. appctl controls
-the system path entirely. A package cannot reference arbitrary system locations.
-
-`package.yaml`:
-```yaml
-volumes:
-  config: /etc/mosquitto     # system: .../config/ → /etc/mosquitto in namespace
-  data:   /var/lib/mosquitto # system: .../data/   → /var/lib/mosquitto in namespace
-```
-
-The paths on the right are conventional Linux paths, exactly what the upstream daemon
-expects. The package author knows these at build time and writes config files referencing
-them normally. The system paths (containing the repo hash) are entirely managed by appctl
-and invisible to the package author.
-
-appctl-generated drop-in:
 ```ini
-# /etc/systemd/system.attached/mosquitto.service.d/99-appctl.conf
+# generated drop-in (the keystone: the image ships intent, the host ships placement)
 [Service]
 User=app6000
 Group=app6000
-BindPaths=/var/lib/appctl/apps/a0d7b954/mosquitto/config:/etc/mosquitto
-BindPaths=/var/lib/appctl/apps/a0d7b954/mosquitto/data:/var/lib/mosquitto
+BindPaths=<root>/apps/a0d7b954/mosquitto/config:/etc/mosquitto
+BindPaths=<root>/apps/a0d7b954/mosquitto/data:/var/lib/mosquitto
+PrivateTmp=yes
 ```
 
-**Default config seeding:** on first install, if a volume target path exists inside
-the squashfs (e.g., `/etc/mosquitto/mosquitto.conf`), appctl copies its contents to
-the writable system directory before the bind mount takes effect. This seeds the writable
-config from the image's defaults. Subsequent installs (updates) do not overwrite
-the user's live config. That is the `post_update` lifecycle hook's responsibility.
+**Config seeding:** on first provision, the config volume is seeded from
+the image's pristine defaults at `/usr/share/factory/etc/<name>/`
+(UAPI.9 factory pattern, ADR-0034). Later version switches never overwrite
+live config (migration is hook territory — T103).
 
----
+## File ownership inside the image
 
-## State storage
+The image is read-only (dm-verity enforced); ownership only affects
+read/execute, never write. **All files inside the image are `root:root`**
+(ADR-0014): binaries `755`, static files `644`. The service user reads and
+executes via world permissions, like any user runs `/usr/bin/anything`.
+The app uid cannot appear inside the image — it doesn't exist at build
+time.
 
-appctl never deletes app records; they are marked `removed` to preserve uid
-assignments permanently and enable reinstall to reuse the original uid.
+Consequences (enforced as conformance, app contract):
 
-State is stored as **one JSON file per record** under
-`/var/lib/appctl/state/`. See
-[On-Device State Format](../schemas/on-device-state.md) for the full file
-layout and field reference. Summary:
+1. No `User=`/`Group=` in shipped units (ADR-0015) — placement comes from
+   the drop-in.
+2. No internal privilege dropping (`setuid()` to a user from the image's
+   own `/etc/passwd`) — the service runs as the single user systemd
+   assigns. Upstream daemons that self-drop must have it disabled at build.
+3. Everything writable at runtime lives in the two bound volumes — never
+   inside the image.
 
-| Record type | Path | Purpose |
-|---|---|---|
-| Repo | `state/repos/<hash>.json` | Configured repos (URL, alias, type, certs) |
-| Package | `state/packages/<hash>-<name>.json` | Installed app (uid, version, status, stack) |
-| Base | `state/bases/<hash>-<name>-<level>.json` | Installed base (ref-counted, layered mode only) |
-| Image | `state/images/<uuid>.json` | Staged DDI metadata (path, hash, size, status) |
+## Allocation rules (ADR-0012 as amended by ADR-0036)
 
-**Why file-per-record, not SQLite:** corruption on SD-card devices takes out
-one record, not the whole state store. Recovery is `cat` or `rm` on a single file.
-Same pattern as dpkg, apk, pacman. See
-[on-device-state.md § Why not SQLite](../schemas/on-device-state.md#why-not-sqlite).
+- **When:** at first `up` (provisioning), not at `get` — caching an image
+  allocates nothing.
+- **Range:** configurable base in the host config, **default 6000+**.
+- **Algorithm:** next free = high-water mark + 1. If that uid is occupied
+  by a **foreign** (non-appctl) user, the runtime **errors loudly** and
+  asks the operator to configure a different range — no silent skipping.
+- **Never reused.** The high-water mark survives `drop`: a dropped app's
+  uid is permanently retired, so no future app can inherit stray filesystem
+  ownership.
+- **Same uid every start.** The uid is recorded in state
+  (file-per-record, ADR-0026) and reused for the app's whole provisioned
+  life — data is never chowned again. `recover` recreates the user from
+  the **recorded** uid.
 
----
-
-## Allocation algorithm
-
-### Allocate (at install)
-
-1. Check for an existing package record for `(repo_hash, name)` in any status.
-
-   - **Found:** reuse the existing uid. Update `status = 'installed'` and `version`.
-   - **Not found:** allocate `max(uid) + 1`, starting at 6000.
-
-2. Write the package record.
-
-3. Write sysusers snippet and call `systemd-sysusers` on it immediately.
-
-4. Create home dirs (`/var/lib/appctl/apps/<hash>/<name>/{config,data}`), `chown app<uid>`.
-
-5. Seed config from squashfs defaults if first install.
-
-6. Generate appctl drop-in with `User=`, `Group=`, `BindPaths=`.
-
-7. Call `portablectl attach`.
-
-Uids are monotonically increasing and never reused across different apps. The `max(uid)`
-high-water mark is preserved even after records are marked `removed`, preventing a newly
-installed app from inheriting filesystem ownership from a previously purged app.
-
-Reinstalling the same app (same `repo_hash` + `name`) reuses the original uid. Data
-dirs remain correctly owned and no `chown` is needed.
-
----
-
-## Collision handling
-
-`(repo_hash, name)` is the unique key. Two apps with the same name from different repos
-are different apps with different uids and fully isolated storage.
-
-Installing an already-`installed` app errors:
-```
-error: offline-lab/mosquitto is already installed (use --force to reinstall)
-```
-
-| Flag | uid | data |
-|---|---|---|
-| _(none, already installed)_ | error | unchanged |
-| `--force` | reused | kept |
-| `--force --purge` | reused | deleted and reseeded from image defaults |
-
----
-
-## Uninstall and cleanup
-
-**`appctl remove <app>`**: detaches service, removes sysusers snippet, marks the record
-`removed`. Data in `/var/lib/appctl/apps/<hash>/<name>/` is kept intact. Uid reserved.
-
-**`appctl remove --purge <app>`**: same, plus deletes `/var/lib/appctl/apps/<hash>/<name>/`.
-The record stays as `removed`; uid is permanently retired from the high-water mark.
-
-**`appctl cleanup`**: dry-run by default. Removes `removed`-status records
-and any orphaned directories on disk. Requires `--yes`. Refuses if a lock file is
-present. Uid slots for cleaned-up records remain retired.
-
----
+Lifecycle interaction (ADR-0032): `down` and `rm` leave the environment —
+uid, config, data — untouched. Only `drop` (total, guarded) removes the
+user, storage, and data together; there is no environment-gone-data-kept
+state, by design.
 
 ## Persistence across reboots
 
-The `/etc` overlay resets on every boot. appctl writes a sysusers snippet to
-`/etc/sysusers.d/<hash>-<name>.conf` at install:
+The runtime writes a sysusers snippet at provisioning:
 
 ```
-u app6000 6000 "offline-lab/mosquitto" /var/lib/appctl/apps/a0d7b954/mosquitto /bin/false
+# /etc/sysusers.d/<index-hash>-<name>.conf
+u app6000 6000 "offline-lab/mosquitto" <root>/apps/a0d7b954/mosquitto /bin/false
 g app6000 6000 -
 ```
 
-`offlinelab-sysusers.service` (runs before `sysinit.target`) calls:
-```
-systemd-sysusers /etc/sysusers.d/*.conf
-```
+…and runs `systemd-sysusers` immediately. On a normal host `/etc`
+persists and that's the end of it. On a wiped-`/etc` host, **`appctl
+recover`** re-derives the snippet (and everything else) from state records
+at boot, with the recorded uid — the mechanism is generic
+(ADR-0036); the OS's only duties are mounting `<root>` first and running
+recover (see `OS-CONFORMANCE.md`).
 
-On remove the snippet is deleted; the user is not recreated on next boot.
+## State
 
-On OL OS, `/etc/sysusers.d/` is bind-mounted from persistent `/data/` storage at boot,
-because `/etc` is ephemeral (overlay upper wiped each boot). On any other systemd host
-these paths work natively. Alternatively, appctl may call `systemd-sysusers` directly
-during rehydrate — the call is idempotent.
-
----
-
-## Buildroot implications
-
-- `systemd-sysusers`: part of `BR2_PACKAGE_SYSTEMD`, already required
-- `offlinelab-sysusers.service`: ships with `offlinelab-bootconf` package
-- No `useradd`/`groupadd` required
+State records live file-per-record under `<root>` (ADR-0026;
+[On-Device State Format](../schemas/on-device-state.md) — pre-pivot page,
+awaiting its own rewrite). The uid high-water mark and per-app uid records
+are the `recover` source of truth and outlive `drop` (retired-uid memory).

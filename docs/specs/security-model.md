@@ -1,460 +1,247 @@
 # Security Model
 
-> **Amended (2026-07-05).** The two-key model is **affirmed** and now framed as
-> the **two-gate architecture** of
-> [ADR-0033](https://github.com/offline-lab/documentation/blob/main/decisions/adr/adr-0033-index-terminology-trust-architecture.md):
-> the *get-gate* (signed index + hash match governs what enters the cache) and
-> the *up-gate* (systemd verifies the DDI's build signature at **every start**).
-> New: **delegation-by-inclusion** (the signed manifest's cert list is the
-> delegation; key roles are positional — resolves Q-B5, no cert marking),
-> identity = index key, carrier-vs-curator, index monotonicity, and the
-> documented flat-`verity.d` caveat. Terminology: repo → index. Where this page
-> conflicts, ADR-0033 wins.
-
-This page describes the trust chain for app packages, how signing keys are managed,
-and what each security mechanism protects against.
+**Status:** rewritten 2026-07-05 against ADR-0037 (trust model), ADR-0038
+(single-file package), ADR-0033/0034 and the
+[Index contract](index-contract.md) (T98). The systemd verification flow and
+image-policy sections are live-test-backed (2026-06-16, Fedora 44,
+systemd 259) and survive from the previous revision.
 
 ---
+
+## The trust principle
+
+> **DDIs carry trust. Indexes carry discovery.** (ADR-0037)
+
+Three layers do three different jobs; only the third is trust:
+
+1. **dm-verity** (hash tree) proves *integrity*: content matches the
+   roothash — unmodified since someone made it. Knows nothing about who.
+2. **The PKCS7 signature over the roothash** is an *authenticity claim*.
+   The signer's certificate rides inside the PKCS7 blob — but a signature
+   carrying its own cert proves only self-consistency; anyone can sign
+   their own image.
+3. **The accepted-cert store** turns the claim into trust: systemd
+   validates the signature against certs the operator explicitly accepted
+   (`/etc/verity.d/`). Trust always belongs to the **app author's build
+   key** — never to an index, a server, a stick, or a transport.
+
+An index's signature provides *catalog integrity and anti-freeze for
+subscribers* — never trust. An index is a collection anyone can copy DDIs
+into; "the publisher vouched for this set" was never a real property.
 
 ## Trust chain
 
 ```
-build key  (private, on build machine only, never on repo server)
-  └── DDI signature partition  ← JSON: {rootHash, signature, certificateFingerprint}
-        └── dm-verity root hash ← inside the signature partition + encoded in GPT partition UUIDs
-              └── verity partition (superblock + hash tree) ← inside the same DDI
-                    └── root partition (squashfs)  ← image blocks, verified at read time
+build key (private; author's build machine only)
+  └── DDI signature partition ← JSON: {rootHash, signature}  (cert inside the PKCS7)
+        └── dm-verity roothash ← also encoded in the GPT partition GUIDs
+              └── verity partition (hash tree)
+                    └── root partition (squashfs) ← blocks verified by the kernel at read time
 
-index.json.p7s  ← PKCS7 signature over the repo index
-  └── index.json ← package listing, verified at repo refresh
+index key (whoever maintains that index — origin, stick-maker, your device)
+  └── signed manifest + catalogs ← discovery, download integrity,
+                                    version/timestamp anti-rollback. NOT trust.
 ```
 
-Both signatures are PKCS7. The build-key signature lives **inside the DDI** in the
-signature partition (JSON: `{rootHash, signature, certificateFingerprint}`). There are
-no companion files; everything systemd needs for verification is encoded in the GPT
-partition table. See [package-format.md](package-format.md) for the full DDI layout and
-partition UUID encoding rules.
+The package is **one file** (ADR-0038); everything systemd needs is inside
+it. A compromised index host can rearrange the catalog but cannot forge a
+single package signature.
 
-The build key never touches the repo server. A compromised repo server can replace
-files, but cannot forge valid signatures without the build key.
+## The two gates
 
----
+| Gate | When | Checks | Provided by |
+|---|---|---|---|
+| **get-gate** | image enters the local collection | subscription: signed catalog + SHA-256 match (download integrity). Import: full signature + verity verification against accepted certs | the distribute tool |
+| **up-gate** | **every start** | PKCS7 over roothash vs `/etc/verity.d/`, then dm-verity activation | systemd, natively — no verification code in our tools |
+
+Known limitation (documented since ADR-0033): `/etc/verity.d/` is a **flat**
+store — an accepted cert verifies any image it signed, regardless of which
+index delivered it. Per-index scoping is enforced at the get-gate plus
+runtime state (appctl refuses to `up` images that bypassed a trusted
+acquisition), not by the store.
 
 ## What each layer protects
 
 | Threat | Protected? | Mechanism |
 |---|---|---|
-| MITM on download | Yes | PKCS7 signature on roothash (inside DDI signature partition) |
-| Malicious repo (without build key) | Yes | 2-key model: repo has index key, not build key |
-| Accidental corruption / partial download | Yes | dm-verity roothash verification at attach |
-| Tampered image at rest on running system | Yes (kernel) | dm-verity runtime block enforcement |
-| Physical access to device | **No** | Kernel/U-Boot mutable without Secure Boot |
-| Root compromise | **No** | Attacker can disable verification |
-
-The crypto secures the **distribution path** (build → repo → download → install). It
-does not and cannot secure the device on Pi hardware (no Secure Boot, no TPM, no
-encrypted storage). On x86 with UEFI Secure Boot + TPM, the full chain becomes
-enforceable. See "What this model does not protect" below.
-
----
+| Tampered download / MITM | Yes | catalog SHA-256 (subscription) + PKCS7 over roothash (always) |
+| Malicious index host (no build key) | Yes | it cannot forge build signatures; systemd verifies at every start |
+| Stale/freeze attack on a subscription | Yes | `version` + `published_at` cross-checked pair; consumers refuse anything older or inconsistent (see Index contract) |
+| Unknown builder on imported media | Yes | import refuses unless the builder's cert is explicitly accepted |
+| Accidental corruption / partial download | Yes | dm-verity verification at attach |
+| Tampered image at rest | Yes (kernel) | dm-verity runtime block enforcement |
+| Physical access to removable storage | **No** | see "What this model does not protect" |
+| Root compromise on the host | **No** | root can bypass anything |
 
 ## Signing keys
 
-Two independent signing keys are used for app packages. They have different trust
-levels, live on different machines, and must never be mixed up.
+Two key roles, different custody, different blast radius. Roles are
+**positional in the signed index manifest** (`keys[]`), never marked in the
+certs themselves (Q-B5 resolved).
 
-### Build key: package integrity (high trust)
+### Build key — trust (high stakes)
 
-Lives on the **build machine only**. Never copied to the repo server. Never committed
-to version control.
+Lives on the **author's build machine only**. Signs the roothash into every
+DDI's signature partition at `buildctl build` (signing is inside `build`;
+unsigned images do not exist — ADR-0031). Compromise = an attacker can forge
+packages; treat like a CA key. The public cert is what consumers accept.
 
-- `<repo>.key`: private build key. Signs the DDI signature partition JSON for every
-  package (build-time only, via pure-Go `go.mozilla.org/pkcs7` in buildctl). No
-  verification code runs at runtime — systemd handles that natively.
-- `<repo>.crt`: public certificate. Published in the repo's `keys/` directory.
-  Imported by `appctl repo add`. Safe to share publicly.
+### Index key — integrity (operational)
 
-Loss of this key means the repo can no longer publish signed packages. A compromised
-build key means an attacker can forge package signatures; treat it like a CA key.
+Every index has one — origin servers, stick indexes, and each device's own
+local collection alike (**every index is always signed**; a disk can be
+moved, so there is no "local only" exemption — ADR-0037). Created at the
+explicit `index init` ceremony of the distribute tool (ADR-0039), never as
+a side effect. Compromise = catalog manipulation for that index's
+subscribers; **cannot** inject content (build signatures still gate every
+start).
 
-### Index key: catalog integrity (lower trust)
+### OS update signing (RAUC)
 
-Lives on the **repo host**. Signs `index.json.p7s` for each arch index after a
-publish. Can be stored on the repo server because its blast radius is limited: a
-compromised index key lets an attacker manipulate the package catalog (advertise old
-versions, hide packages) but **cannot forge package content**. systemd verifies the
-build-key signature in the DDI signature partition at attach time regardless of what
-the index says.
+Offline Lab OS signs its OTA bundles with a separate PKI. That is an
+OS-side concern (`OS-CONFORMANCE.md`), fully independent of app signing.
 
-- `<repo>-index.key`: private index key. Stays on the repo host.
-- `<repo>-index.crt`: public certificate. Also published in `keys/`. appctl uses it
-  to verify the index; it does not use it to verify packages.
+## Getting certs onto a device
 
-These are separate certs with separate `key_id` values. appctl knows which is which
-from the `keys[]` array in the root index and from the `signing_key_id` on each
-package entry (which always points to the build key cert).
+Two ceremonies, matching the two acquisition paths (ADR-0037):
 
-### RAUC OTA signing
+- **Subscribe** — `index trust <url|path>`: fetch the manifest, show the
+  index identity + fingerprint, pin the index key, and **bulk-accept the
+  builder certs it distributes** (`keys[]` + `keys/` — the manifest is a
+  cert-distribution channel, not a trust root). Build certs land in
+  `/etc/verity.d/<index>-<key-id>.crt`; the index key is pinned in the
+  tool's VOA store (UAPI.11, ADR-0034).
+- **Import** — for raw DDIs from anywhere: the tool reads the signer cert
+  out of the DDI's PKCS7, shows fingerprint + subject, and asks. Accepting
+  a builder is an explicit act; on yes, the cert enters the store and the
+  image is fully verified and added to the local index.
 
-RAUC uses a separate PKI for signing update bundles (`.raucb` files):
+Untrusting an index (`index drop`) removes its pinned key and the certs
+that arrived through it (refusing while its apps remain provisioned —
+ADR-0032).
 
-- `.rauc/ca.cert.pem`: CA certificate baked into the OS image at build time.
-  Devices use this to verify update bundles.
-- `.rauc/ca.key.pem`: CA private key. Stays on the signing machine, never in the
-  image, never committed.
-- `.rauc/cert.pem` / `.rauc/key.pem`: signing cert/key used by `rauc bundle`.
+## Verification flows
 
-These are distinct from app package signing keys. The RAUC PKI covers OS update
-integrity; app signing covers individual package integrity. Both use PKCS7 but
-with separate key material and separate verification paths.
+### At acquisition
 
-The `.rauc/` directory is gitignored. See the build docs for how to provision it.
+Subscription `get`: download per the signed catalog, check SHA-256.
+Import: the full ADR-0038 order — GPT probe (type UUIDs) → PKCS7 vs
+accepted certs → verity verification → only then extract the embedded
+manifest. **Unverified images are never parsed.**
 
----
+### At every start — systemd's userspace flow (live-tested)
 
-## Key creation
+Verified 2026-06-16 (Fedora 44 VM, systemd 259, OpenSSL 3.5.5); the flow in
+`src/shared/dissect-image.c` (`validate_signature_userspace()`):
 
-Generate a build keypair on the build machine:
+1. `portablectl attach` (or nspawn) invokes image dissection.
+2. Partitions are discovered by GPT **type UUID** (UAPI.2).
+3. The signature partition JSON (`{rootHash, signature}`) is read.
+4. **Kernel keyring verification is tried first** and, in our open
+   multi-publisher model, always fails (no certs there) — logged at debug
+   level and expected, not an error.
+5. **Userspace fallback:** every `*.crt` in the `verity.d/` hierarchy is
+   loaded; `PKCS7_verify(...)` succeeds if any cert validates the
+   signature.
+6. On success, dm-verity is activated with the roothash; the kernel then
+   verifies every block read.
+7. On failure, attach is refused — because of the pinned image policy
+   below. **No fallback to unsigned.**
 
-```
-buildctl key generate --name offline-lab --out ./keys/
-```
+Userspace verification is on by default (three independent guards all
+default on). **Hard requirement:** systemd built with OpenSSL (ADR-0003).
 
-Produces `offline-lab.key` (secret, stays on build machine) and `offline-lab.crt`
-(public, publish to repo). Never copy the `.key` to the repo server.
+### Image policy (live-tested)
 
-Generate an index keypair on the repo host:
-
-```
-buildctl key generate --name offline-lab-index --index --out ./keys/
-```
-
-Produces `offline-lab-index.key` (stays on repo host) and `offline-lab-index.crt`
-(public, publish to repo alongside the build cert). The `--index` flag marks this
-cert as an index-signing key; buildctl and appctl use this distinction to know which
-cert verifies packages and which verifies the index.
-
----
-
-## Key import on device
-
-```
-# HTTP or HTTPS repo
-appctl repo add https://packages.offline-lab.com --name offline-lab
-
-# USB or local filesystem repo
-appctl repo add file:///mnt/usb/offline-lab-repo --name offline-lab
-```
-
-Fetches `repository.json` and `repository.json.p7s`, downloads the active certs
-from `keys/`, verifies the manifest signature against the index cert
-(trust-on-first-use), then:
-
-- Writes the **build cert** to `/etc/verity.d/<repo-name>-<key-id>.crt`. systemd reads
-  this at attach time to verify the DDI signature partition. The cert is published at
-  `keys/signing-<key-id>.crt` in the repo.
-- Stores the **index cert** in appctl's internal state
-  (`state/repos/<hash>.json`). appctl uses it
-  to verify index signatures on subsequent `repo refresh` calls. systemd does not need
-  it.
-
-All subsequent attach operations trigger systemd's native userspace verification of the
-DDI signature partition against the build cert. Index refreshes verify against the
-index cert. **appctl performs no PKCS7 verification itself at runtime.**
-
-`appctl repo remove <name>` removes the repo, deletes the build cert from
-`/etc/verity.d/`, and drops the index cert from the repo's state record. On key compromise,
-remove and re-add the repo after the operator rotates the affected key.
-
-On Offline Lab OS, `/etc/verity.d/` is bind-mounted from persistent `/data/` storage at
-boot, because `/etc` is an overlayfs whose upper layer is wiped on every boot. On any
-other systemd host the standard path works natively.
-
----
-
-## Multi-repo
-
-Each repo has its own independent signing key. Users import keys per repo at
-`appctl repo add` time. There is no central CA, no cross-signing, and no coordination
-between repo operators. Any publisher can create a repo and signing key without
-involving the appctl maintainers.
-
----
-
-## Allowed protocols
-
-HTTP, HTTPS, and `file://` are all permitted. This mirrors Debian's apt transport
-model: transport confidentiality is provided by HTTPS when available, but content
-integrity comes from the PKCS7 signatures regardless of transport. HTTP is safe for
-offline and local network repos where HTTPS certificates are impractical, as long as
-signing is in place. `file://` is required for USB and air-gapped repo use.
-
----
-
-## Signature verification
-
-### At install time (appctl stages, systemd verifies)
-
-appctl downloads the DDI and metadata JSON, optionally pre-checks the PKCS7 signature
-in userspace for early failure, then:
-
-1. Stages the DDI to `/var/lib/appctl/images/<uuid>/<name>_<version>_<arch>.raw`.
-2. Ensures the matching build cert is present at
-   `/etc/verity.d/<repo-name>-<key-id>.crt`.
-3. Hands off to `portablectl attach` (or `systemd-nspawn --image=` for
-   `runtime: nspawn`).
-
-From this point, **systemd performs all signature and verity verification natively**.
-appctl has no PKCS7 verification code at runtime.
-
-### systemd userspace verification flow
-
-Verified by live test (2026-06-16, Fedora 44 VM, systemd 259, OpenSSL 3.5.5). The flow
-in `src/shared/dissect-image.c` (`validate_signature_userspace()`, lines ~3080-3256) is:
-
-1. `portablectl attach <ddi.raw>` invokes systemd-dissect.
-2. systemd discovers the root, verity, and signature partitions by GPT type UUID (per
-   the Discoverable Partitions Specification, UAPI.2).
-3. Reads the signature partition JSON: `{rootHash, signature, certificateFingerprint}`.
-4. **Tries kernel keyring verification first** (`crypt_activate_by_signed_key`).
-   - In the open multi-publisher model, certs are not in the kernel keyring, so this
-     always fails. systemd logs this at debug level and falls through — it is expected
-     behavior, not an error.
-5. **Falls back to userspace verification** (`validate_signature_userspace()`):
-   - Scans `*.crt` files in the `verity.d/` hierarchy (see below).
-   - Loads each as an X.509 PEM certificate.
-   - Calls `PKCS7_verify(signature, certs, roothash, PKCS7_NOINTERN|PKCS7_NOVERIFY)`.
-   - Succeeds if any cert validates the signature.
-6. On success, activates dm-verity via the root hash (no signature sent to the kernel).
-7. On failure, refuses to attach unless the image policy allows unsigned verity. appctl
-   sets an explicit image policy in drop-ins (and `.nspawn` files) that makes signature
-   verification failure fatal. See [Image policy](#image-policy) below.
-
-Userspace verification is enabled by default. Three independent guards all default to
-on: the `DISSECT_IMAGE_ALLOW_USERSPACE_VERITY` flag (set unconditionally in
-`dissect_open_image()`), the `$SYSTEMD_ALLOW_USERSPACE_VERITY` environment variable,
-and the `systemd.allow_userspace_verity=` kernel command-line argument.
-
-**Hard requirement:** systemd must be compiled with OpenSSL (`HAVE_OPENSSL`). Without
-it, userspace verity verification is impossible. OL OS (Buildroot) must ensure the
-systemd package is built with OpenSSL support.
-
-### Image policy
-
-systemd's default image policy accepts any protection level
-(`verity+signed+encrypted+unprotected+unused+absent`), meaning unsigned verity is an
-acceptable fallback. Without an explicit policy, a DDI whose signature verification
-fails can still be activated as unsigned verity — defeating the purpose of signing.
-
-**Decision:** every image appctl attaches — single-image app, base image, or
-extension image — MUST be cryptographically signed. Unsigned images are never
-distributed, never accepted at install, and never activated at runtime. There is no
-fallback path.
-
-**Canonical policy string:**
+systemd's *default* policy accepts unsigned verity — without an explicit
+policy, deleting the cert did **not** prevent mounting in the live test.
+Therefore every attach carries the canonical policy, written into the
+generated drop-in (portable) or `.nspawn` file:
 
 ```
 root=signed:=absent
 ```
 
-Read as:
+`root=signed` — root must exist, with dm-verity and a valid signature
+(requirements for verity/verity-sig partitions are auto-derived).
+`=absent` — every other partition type is forbidden; the DDI contains
+exactly root + verity + verity-sig. Layered apps split this into
+`RootImagePolicy=`/`ExtensionImagePolicy=` (same string, systemd ≥ 254 —
+ADR-0028). The string is a stable contract, not operator-configurable.
 
-- `root=signed` — the root partition must exist, must have dm-verity, and must be
-  accompanied by a valid PKCS7 signature over the roothash. systemd auto-derives
-  matching requirements for the `root-verity` and `root-verity-sig` partitions from
-  the `signed` flag on `root`.
-- `=absent` (empty partition identifier) — the default for any partition type not
-  explicitly listed. Every other partition type (`usr`, `home`, `srv`, `tmp`, `var`,
-  `swap`, `esp`, `xbootldr`) is forbidden. The DDI must contain only root,
-  root-verity, and root-verity-sig partitions — exactly what buildctl produces.
+### The `verity.d/` hierarchy
 
-This policy applies to every image class. Anything looser (`verity`, `unprotected`)
-admits unsigned images. Anything tighter (`encrypted`) requires LUKS, which does not
-apply to read-only squashfs DDIs.
-
-**Where appctl writes it:**
-
-- Portable mode (single image, systemd ≥ 250): `ImagePolicy=root=signed:=absent` in
-  the service drop-in at
-  `/etc/systemd/system.attached/<name>.service.d/99-appctl.conf`.
-- nspawn mode: `ImagePolicy=root=signed:=absent` in the `.nspawn` file.
-
-The policy string is a documented contract. Operators and packagers can rely on it
-being stable; it is not configurable at runtime. See
-[systemd.image-policy(7)](https://www.freedesktop.org/software/systemd/man/latest/systemd.image-policy.html)
-for the full policy syntax.
-
-**Verified by live testing** (2026-06-16, Fedora 44, systemd 259): without an explicit
-policy, removing the cert from `/etc/verity.d/` did NOT prevent the image from
-mounting — systemd fell back to unsigned verity. With `ImagePolicy=root=signed:=absent`,
-the same test correctly refuses attachment.
-
-### `/etc/verity.d/` hierarchy
-
-systemd searches these directories in priority order (highest first), matching the
-[UAPI.11 (VOA)](https://uapi-group.org/specifications/specs/file_hierarchy_for_the_verification_of_os_artifacts/)
-file hierarchy for verification of OS artifacts:
+systemd searches, highest priority first:
 
 | Path | Use |
 |---|---|
-| `/etc/verity.d/` | Admin override (highest priority) |
-| `/run/verity.d/` | Runtime (volatile, e.g. temporarily added for testing) |
-| `/usr/local/lib/verity.d/` | Local vendor |
-| `/usr/lib/verity.d/` | Distro vendor (lowest priority) |
+| `/etc/verity.d/` | admin-accepted certs (the tools write here) |
+| `/run/verity.d/` | volatile/testing |
+| `/usr/local/lib/verity.d/` | local vendor |
+| `/usr/lib/verity.d/` | distro vendor (e.g. OL OS bakes the project cert here for the tools-sysext, T105) |
 
-`*.crt` files are PEM-encoded X.509 certificates. Masking via a symlink to `/dev/null`
-is supported (the `CONF_FILES_FILTER_MASKED` flag is honored), so an admin can disable
-a specific cert without deleting it.
+`/dev/null` symlink masking is honored. On OL OS the persistence of
+`/etc/verity.d/` across the overlay wipe is the OS's duty
+(`OS-CONFORMANCE.md` / `recover`).
 
-appctl writes build certs only to `/etc/verity.d/`. On Offline Lab OS, `/etc/verity.d/`
-is bind-mounted from persistent `/data/` storage at boot, because `/etc` is an overlayfs
-whose upper layer is wiped on every boot. On any other systemd host, the standard path
-works natively.
+### At subscription refresh
 
-### At runtime (dm-verity)
+The distribute tool re-fetches the manifest/catalogs, verifies the index
+signature against the pinned key, and enforces **monotonicity**: the
+`version` + `published_at` pair must be internally consistent and not older
+than the highest pair seen for that identity (see
+[Index contract](index-contract.md)). Imports consume no foreign catalog, so
+no staleness question arises there.
 
-systemd-dissect activates dm-verity with the root hash during attach. The kernel
-verifies every block read against the hash tree. An image that has been modified after
-install will fail to mount or cause read errors on tampered blocks.
+## Multi-index
 
-This check happens in the kernel on every read from the squashfs. It cannot be bypassed
-from userspace.
+Each index has its own keys. No central CA, no cross-signing, no
+coordination: any publisher creates keys and publishes without involving
+anyone. Any device is itself an index author (its local collection).
 
-### At repo refresh (appctl)
+## Transports
 
-`appctl repo refresh` re-downloads `index.json` and verifies `index.json.p7s` against
-the stored index cert before updating the local package cache. A tampered or unsigned
-index is rejected. This verification is performed by appctl directly (not systemd),
-because the index is a JSON catalog, not a DDI.
-
----
-
-## Repository trust rules
-
-**Same-server rule:** appctl rejects any package download URL that resolves to a
-different server than the repo's `base_url`. A legitimate index cannot be used to
-redirect downloads to a different server.
-
-**No redirect following across origins:** if a repo server responds with an HTTP
-redirect to a different origin or base URL, appctl rejects it. Redirects within the
-same origin are permitted (e.g. HTTP to HTTPS on the same host).
-
-**Single source of truth:** the `base_url` set at `appctl repo add` time is the
-authoritative origin for that repo. Index and packages must come from that origin.
-
----
-
-## Repo status and blocklist
-
-Each repo's state record at `state/repos/<hash>.json` carries a `status` field:
-
-| Status | Behaviour |
-|---|---|
-| `active` | Normal operation; refresh, install, update allowed |
-| `paused` | No automatic refresh or updates; manual install still works |
-| `blocked` | All operations rejected; installed packages from this repo still run |
-
-`appctl repo pause <name>` and `appctl repo block <name>` manage this field.
-A repo operator can optionally publish a signed blocklist via their index (future).
-
----
-
-## What this model does not protect
-
-**Honest boundary.** Crypto secures the **distribution path** (build → repo → download
-→ install). It does not and cannot secure the device on Pi hardware: there is no TPM,
-no Secure Boot (no UEFI firmware), and no encrypted storage. dm-verity and package
-signing protect against software-level tampering and supply-chain attacks; they do not
-protect against a determined attacker with physical access to removable storage.
-
-dm-verity stays in the design despite the Pi limitation because:
-
-- The platform is expanding to x86 and standard ARM64 where UEFI Secure Boot is
-  available and the full chain becomes enforceable.
-- PKCS7 + roothash verification at install time works on all hardware.
-- Runtime enforcement depends on hardware capability (marginal on Pi, real on x86).
-
-A Secure Boot implementation for Pi exists, but adds limited value here: even with a
-verified boot chain, the storage is still removable and replaceable. This is an accepted
-hardware boundary. RAUC bundle signing protects OTA update integrity within this
-boundary.
-
-**Physical access to removable storage:** these devices boot from SD cards or
-removable NVMe. An attacker with physical access can remove the storage medium, modify
-it on another machine, and return it.
-
-**Root on the device:** a process running as root can call `portablectl attach`
-directly without going through appctl, bypassing install-time pre-checks. Root access
-is assumed to be a fully compromised state.
-
-**Key rotation latency:** if a signing key is compromised, already-installed packages
-on devices will continue to pass dm-verity (the block hashes are still valid). Devices
-must rotate the repo cert and update affected packages.
-
----
+HTTP, HTTPS, `file://`, ssh — all permitted (apt's model): integrity and
+trust come from signatures, never from the transport. All URLs inside an
+index are **relative**, so an index works identically at any location
+(ADR-0033 as amended).
 
 ## Key rotation
 
-When a repo operator needs to rotate their signing key, two approaches are available.
+Per ADR-0007 (gradual, multi-cert):
 
-### Option A: Gradual rotation (recommended for large or offline-first repos)
+1. The author generates a new build keypair; new packages are signed with
+   it. Old packages keep their valid signatures.
+2. The new cert is published in the index's `keys[]`; subscribers pick it
+   up at the next refresh (`key_rotation` counter bumps). Import users
+   accept it at the next import.
+3. Both certs coexist in `verity.d/` during the transition; systemd
+   verifies each package against whichever cert matches.
+4. The old cert is pruned once nothing depends on it.
 
-1. Generate a new keypair: `buildctl key generate`
-2. New packages published from this point are signed with the new key. Old packages
-   keep their existing signatures; no re-download required.
-3. Publish the new cert in the repo. Devices fetch it during the next `appctl repo refresh`.
-4. `appctl repo add-key <name> <cert>` stores the new cert alongside the old one on device.
-5. systemd verifies each package at attach time against the cert matching its
-   `signing_key_id` field. Old packages verify against the old cert; new or updated
-   packages verify against the new cert.
-6. After 90 days (configurable, or manually), the old cert is pruned:
-   `appctl repo remove-key <name> <key-id>`. Any package still signed with the old key
-   must be updated before the old cert is removed.
+A clean cut-over (re-sign everything, bump `key_rotation`, prune
+immediately) remains the post-compromise option.
 
-This approach is safe for air-gapped and offline devices; they transition at their own
-pace without forced re-downloads.
+## What this model does not protect
 
-### Option B: Clean cut-over (for small repos or post-compromise)
-
-1. Generate a new keypair.
-2. Re-sign all packages: `buildctl rebuild --all` (see buildctl docs).
-3. Bump the `key_rotation` counter in `index.json`.
-4. `appctl repo refresh` detects the counter change and re-downloads and re-verifies
-   all installed packages from that repo against the new cert.
-5. Remove the old cert from the repo.
-
-This is simpler for repos with few packages but requires devices to be reachable to
-complete the rotation.
-
-### Cert storage on device
-
-```
-/etc/verity.d/<repo-name>-<key-id>.crt   ← one file per key ID per repo (build certs)
-```
-
-`signing_key_id` in the package metadata JSON carries the fingerprint of the build key
-that signed the DDI signature partition. appctl uses it to match the package to the
-correct cert at install time. systemd reads the cert at attach time. If no matching
-cert is in `/etc/verity.d/`, attachment fails.
-
-Index certs are stored in appctl's repo state records under
-`state/repos/<hash>.json`, not in `/etc/verity.d/`. systemd does
-not need them.
-
----
+**Honest boundary.** The cryptography secures the distribution path
+(build → index → acquisition → start). It cannot secure a host whose
+hardware offers no Secure Boot, TPM, or storage encryption (e.g. SD-card
+SBCs): an attacker with physical access can modify the medium offline, and
+root on the host can bypass every gate (attach images directly, edit the
+trust store). On UEFI + TPM hardware the chain becomes enforceable
+end-to-end. Already-installed packages keep passing dm-verity after a key
+compromise (their block hashes remain valid) — rotation + updates close
+that window.
 
 ## Permanent design decisions
 
-**Userspace verification is the permanent answer, not a stopgap.** systemd's
-`validate_signature_userspace()` via `verity.d/` is the chosen mechanism for runtime
-signature verification. This is not a compromise pending kernel-keyring support.
-
-The kernel `.secondary_trusted_keys` keyring path requires every repo key to be
-cross-signed by a CA baked into the kernel. This is incompatible with the open,
-multi-publisher repo model where any publisher creates their own key without involving
-offline-lab. systemd's userspace path sidesteps this entirely.
-
-VOA (UAPI.11, Verification of OS Artifacts) is a draft spec that generalizes the
-`verity.d/` concept. The current implementation is systemd's `verity.d/` hierarchy.
-Migration to VOA, if it ever materializes, is a systemd concern — appctl's contract
-(put the cert in the right place) does not change.
+- **Userspace verification via `verity.d/` is the permanent mechanism**,
+  not a stopgap: the kernel-keyring path requires CA cross-signing baked
+  into the kernel, incompatible with the open multi-publisher model.
+- **VOA (UAPI.11) adoption is two-step** (ADR-0034): the tools' own trust
+  material (pinned index keys, per-index context) uses the VOA hierarchy
+  now; the up-gate migrates off flat `verity.d/` when systemd consumes VOA
+  (tracked as T99 — that migration also closes the flat-store caveat).
+- **No verification code in our tools at runtime.** systemd verifies;
+  the tools arrange files and write policy.

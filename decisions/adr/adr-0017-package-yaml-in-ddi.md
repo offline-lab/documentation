@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted |
+| **Status** | Accepted — elevated by ADR-0038 (2026-07-05): the embedded manifest is no longer a convenience copy but **the** package metadata; the standalone `.json` is gone |
 | **Date** | 2026-06-16 |
 | **Deciders** | Offline Lab core team |
 | **Supersedes** | None |

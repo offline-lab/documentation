@@ -307,6 +307,10 @@ sharing few bases**, and the levers are policy, not clever block-dedup:
 
 ### Layering: distro base + optional runtime layer + app (cap 3)
 
+> **Superseded 2026-07-05 (§20): the language/runtime layer is removed.**
+> The cap is now **2 — one distro base + the app**. Language variety becomes
+> flat base flavors (`debian-python` is a complete base). Rationale in §20.
+
 The stack is capped at **3 layers**, affirming `design/layered-images.md`:
 
 | Layer | Role | Example |
@@ -767,7 +771,330 @@ cross-layer build deps (parked).
 
 ---
 
-## 16. UAPI family audit (2026-07-05, proposed)
+## 16. UAPI family audit (2026-07-05, **ratified** — folded into ADR-0034)
+
+> Ratification note: the UAPI.9 inside-view raised an RO-filesystem concern,
+> resolved in discussion — the mounts are per-unit namespace bind mounts
+> (nothing writes to host or image `/etc`), and the image must ship the empty
+> mount-point dirs (`/etc/<name>/`, `/var/lib/<name>/`), created by buildctl
+> at build time (a mount point cannot be created on a read-only squashfs).
+> On OL OS, `recover` + the `<root>` bind-mount cover the host side.
+
+---
+
+## 17. App-contract drafting rulings (2026-07-05)
+
+The app contract was drafted (`docs/specs/app-contract.md`, T93). Rulings made
+during review:
+
+- **Activation is `<name>.service` / `<name>.socket`; no activation-list
+  field.** Additional execution comes from the `lifecycle:` hooks and
+  systemd-wired oneshots. *(An earlier wording of this bullet asserted my own
+  incorrect hook framing; corrected — the hook model was then redesigned in
+  §18.)* `stack:` stays as the lineage field.
+- **`expose`/`devices`/`resources` are core, not cut.** Device access and
+  port declarations are essential to the ecosystem; their concrete definition
+  (device-class → `/dev` mapping — revives Q-A4 — and expose semantics vs the
+  OS-side firewall) is scheduled up-front as **T101**. The schema work (T95)
+  blocks on T101 for these fields only.
+- **Manifest is YAML only.** `package.json` dropped: JSON is comment-hostile,
+  and JSON is valid YAML anyway.
+
+---
+
+## 18. Lifecycle hooks redesign (2026-07-05, ratified)
+
+The hook model is redesigned, not just re-anchored. Rulings:
+
+- **Hooks stay, strengthened — this is a partial redesign, not a trim.**
+  Rationale (operator): hooks serve a wide range — copy files, run
+  migrations, run tasks before the main job, chown a socket, and corner
+  cases like starting side software from the same image (a worker beside a
+  webservice). These units are not started by portablectl/nspawn, so the
+  runtime rolls its own start mechanism. Killing or shrinking hooks would
+  push developers into unmaintainable bash without systemd's error
+  handling. "If someone wants to run 15 jobs before the main task, that is
+  the dev's choice and we should provide it."
+- **Each stage is an ordered list of unit files** (was: one unit per hook).
+  Amends ADR-0016; the explicit-or-absent principle is unchanged.
+- **Stage set (ratified):** `pre_start` / `post_start` fire on **every
+  `up`**; `pre_stop` / `post_stop` on every `down`; `pre_drop` before
+  teardown. Upgrade stages (`pre_upgrade`/`post_upgrade`) are defined with
+  the upgrade design (T103). No verb-anchored renaming ceremony — the
+  familiar `pre_/post_` names stay (rename-for-its-own-sake rejected as
+  slop).
+- **Idempotency lives in the units, not the tool:** hooks fire every time
+  their stage fires; one-time behavior is the unit's own
+  `ConditionPathExists=`-style guard. Consequently **`recover` replays hooks
+  like a normal `up`** — the condition guards make it safe — which requires
+  storage mounts to be in place before recover runs (already the OS-side
+  ordering: `<root>` mounts, then recover).
+- **Failure semantics (stricter than the old spec):** a failing pre-stage
+  hook **aborts its verb loudly**; `--force` skips. Replaces the old
+  "pre_remove failure is ignored" rule — consistent with the guarded-force
+  grammar.
+- Systemd-wired oneshots inside the image remain available and preferred for
+  pure ordering concerns; hooks are the runtime-invoked stages.
+- **Env-var set ratified in the T98 rewrite (2026-07-05):** keep `APP_NAME`,
+  `APP_VERSION`, `APP_CONFIG_DIR`, `APP_DATA_DIR`; **drop** `APP_FIRST_RUN`
+  (condition guards replace it) and `APP_PREV_VERSION` (moves to T103's
+  upgrade stages). Also routed to T103: the storage-layout tension between
+  ADR-0020 (uuid-keyed image dirs) and the ADR-0037 local collection
+  (`<name>/<version>/` index layout) — entangled with retention/revert/vpick.
+
+## 19. systemd research digest (2026-07-05) + parked design debt
+
+Operator-directed reading of 0pointer.net (v256–v261 stories, Amutable) to
+find usable engine features. Finds:
+
+- **`systemd-vpick` / `.v/` directories (v256):** `RootImage=`,
+  `ExtensionImages=`, nspawn and portabled natively resolve a `<name>.raw.v/`
+  directory to the newest contained version — **UAPI.10 ordering over our
+  exact `<name>_<version>_<arch>` filename convention**, with arch filtering
+  and optional try-counters (`+LEFT-DONE`, A/B-style fallback).
+- **Portabled image pinning (v260) + `portablectl reattach` (v248):** v260
+  portabled pins the attached image (unchangeable without explicit
+  reattach) — upstream's own endorsement of pin-by-default; `reattach`
+  swaps with restart-not-stop and preserves the fd store; old↔new matched by
+  the name before the first `_` (our convention, again).
+- **`.mstack/` mount stacks (v260):** a directory *is* a declared layer
+  stack (`layer@0.raw → base.raw`, symlinks into a store, optional writable
+  top), consumed by `RootMStack=`, nspawn `--mstack=`, `mount -t mstack`;
+  `importctl pull-oci` lands OCI images as mstacks. Candidate future shape
+  for the layered-app runtime view (upgrade = repoint a symlink); verity /
+  ImagePolicy semantics and portable-profile fit **must be verified** before
+  adoption (T103).
+- **Unprivileged portable services (v260):** portabled runs as a user
+  service (`portablectl --user`) on fresh kernels — future softening of the
+  root-only privilege model; `doctor` rule candidate.
+- Minor: v258 factory-reset rework + `systemctl reload` reloads confexts
+  (OS/boxctl side); **Amutable** = new company by the systemd founder (Jan
+  2026, image-based verified Linux) — strategic neighborhood awareness.
+- Proposed and pending: the **runtime view as engine-native symlink farms**
+  (`.v/` for fat apps, `.mstack/` for layered) materialized over the
+  verbatim cache — carrier-pure cache, `ls`-inspectable runtime state.
+  Decide within T103.
+
+**Parked design debt (operator, 2026-07-05):** three "will become an issue"
+items tracked as tasks — **T102 secrets** (signed public images can never
+contain secrets; systemd-creds/`LoadCredentialEncrypted=` candidates),
+**T103 upgrading images** (the digest above), **T101 `/dev` device access**
+(bluetooth/video/audio — already scheduled). Plus **T104 unit-file
+validation in buildctl** and **T105 CLI tools shipped separately from the OS
+image** (see TODO).
+
+---
+
+## 20. Index-contract review rulings (2026-07-05)
+
+Rulings from the T94 review:
+
+### The language layer is killed (cap: base + app)
+
+The 3-layer ruling (§base-layering) is **amended: max 2 layers — one distro
+base + the app.** Language/runtime variety becomes **flat base flavors**
+(`debian-python` = distro *plus* interpreter, a complete base, not a layer).
+"We can always add it later; for now it reduces complexity to go without."
+
+Rationale (operator + discussion):
+
+- The OCI-twin build pattern means two artifacts *promised* identical —
+  slight docker↔DDI drift is the worst kind of bug (small differences debug
+  harder than large ones), and docker offers no real way to extract a single
+  layer from a manifest. Simple things were getting hard.
+- Size doesn't justify it: a language interpreter is MBs, not GBs.
+- v260 `.mstack` keeps this reversible: a future flavor could become a
+  two-layer stack behind the same name without apps noticing.
+- **The additivity/overlap gate stays regardless** (recommended, not
+  vetoed): at build, intersect the app layer's file list with the base's;
+  any overlap is a build error — turns UAPI.4's unenforced "extensions
+  should be additive" into a hard conformance rule (T104 family).
+
+Amends: ADR-0028/0034 cap notes, app contract §5, `layered-images.md`.
+Terminology confirmed: **`apps/` = functional images devs ship**; the other
+class is `bases/`.
+
+### The `.zip` transport bundle is killed
+
+The DDI's payload is already compressed (zstd squashfs / erofs inside the
+GPT image); zipping re-compresses for a few percent. Transport is the
+operator's tool; anyone squeezing a slow link can compress the file
+themselves.
+
+### Catalog anti-rollback: two cross-checked fields
+
+Per ADR-0033 monotonicity, each signed catalog/manifest carries **two
+fields that must always move together**:
+
+- a monotonically increasing **generation number** (human-readable counter;
+  the operator called it "version" — named `generation` in the contract to
+  avoid clashing with app/spec versions), and
+- a **build timestamp** (unixtime, set when the catalog is signed).
+
+Consistency rules (any disagreement = "iffy, bail out"):
+
+- equal generation but different timestamp → **refuse** (two different
+  catalogs claiming the same generation);
+- newer generation with older timestamp → **refuse**;
+- older generation with newer timestamp → **refuse**.
+
+A consumer remembers the highest consistent pair per index identity and
+refuses anything older. Open: whether a loud `--force`-class override may
+accept a *stale* (older-than-watermark) catalog in offline corner cases —
+under discussion; no separate "publish time" field (signing *is*
+publishing — the index is files).
+
+---
+
+## 21. Index-contract discussion, round 2 (2026-07-05)
+
+### Ruled
+
+- **Field naming:** the index file carries `version` (monotonic index
+  version — the "generation" name is rejected as an inconvenient way to say
+  VERSION) + a publish timestamp (unixtime, set at signing; the
+  cross-check/bail rules of §20 apply to this pair). **Per entry:
+  `added_at`** — when the DDI was published into this index. Two signing
+  moments exist and are both tracked: the DDI is signed at *build*, the
+  index at *publish* (adding a DDI to an index *is* publishing). The DDI's
+  own build time lives in the DDI metadata.
+- **An app's `version` is the DDI version the developer assigns.** The
+  version of the software *inside* is deliberately untracked — downgrading
+  the inner software still bumps the DDI version. (Visibility of inner
+  versions parked as T106.)
+- **Search:** index-file-only text matching, confirmed against precedent
+  (apt `Packages`, helm `index.yaml`, brew — all local matching, none fetch
+  per-package data). Entries carry `name` + `description`. **Freeform tags
+  rejected** (10k-label sprawl); at most one optional `category` from a
+  small predefined curated list (Debian-Sections-style). Results shown per
+  index alias (`offline-lab/mosquitto 2.0.18` vs `franks-lab/mosquitto
+  2.1.0`).
+- **`stack:` is reserved for the future compose feature** (multi-app stacks,
+  T53). The lineage field is **`base:`** (single object: `name` +
+  `sysext_level`).
+- **"Sidecar" is banned.** The term is **DDI metadata** — an essential part
+  of the package format (without it an app cannot run), not a second-grade
+  attachment. (Kubernetes-world confusion.)
+
+### Positions stated — model under discussion, NOT yet confirmed
+
+- **Trust was never the index signature's job.** "Trust should be at the app
+  author, not the index itself" — an index is just a collection of DDIs
+  anyone can copy into; the index *file* exists for discovery and version
+  tracking; **trust rides the image's build signature**. Index signing =
+  integrity/anti-freeze, and (locally) the curator's own statement.
+  (This demotes ADR-0033's delegation-by-inclusion from trust-root to
+  cert-distribution channel — rewrite pending confirmation.)
+- **Sticks:** one may build an index *on* a stick (by signing one for it),
+  or copy DDIs off a stick into one's own local index. Copying whole index
+  trees verbatim ("cp is a cute idea") is doubted — partial copies open
+  cans of worms; leaning: **copy DDIs, sign your own local index**.
+- **Indexing/searching should move to its own tool**, distinct from appctl
+  and buildctl ("it's a different thing than what either does") — would
+  reverse the earlier build+index one-codebase preference; implications
+  under discussion.
+- **Single-file package** (kill the standalone metadata file; extract the
+  ADR-0017 embedded manifest at index time): direction attractive, but
+  operator flagged a **chicken-and-egg concern** — the DDI must be verified
+  before its embedded `package.yaml` may be read, yet the metadata seems
+  needed to process the package. Execution-order walkthrough owed; under
+  discussion.
+
+### Parked
+
+- **T106** — inner-software-version visibility (SBOM-ish?) without
+  becoming overhead. "We're not a single-binary delivery mechanism… talk
+  more about this later."
+
+---
+
+## 22. Distribution model confirmed (2026-07-05) → ADR-0037/0038/0039
+
+### Confirmed
+
+- **"DDIs carry trust; indexes carry discovery"** — the subscribe + import
+  model is ratified (→ **ADR-0037**, amending ADR-0033). Subscribe = a
+  signed index at any location; its signature buys *catalog integrity + the
+  version/timestamp anti-freeze pair, never trust*. Import = raw DDIs from
+  anywhere, each verified by its build signature against accepted certs,
+  added to one's own index. Carrier-vs-curator, never-merge,
+  presence≠authenticity, and the stale-catalog `--force` question are all
+  dissolved/mooted by the model.
+- **No chicken-and-egg** in the single-file package: verification is
+  metadata-free by DPS construction (GPT type UUIDs → signature vs trust
+  store → verity → only then read content). The **single-file package is
+  ratified** (→ **ADR-0038**): the standalone DDI-metadata `.json` dies; the
+  ADR-0017 embedded manifest becomes *the* manifest, extracted at
+  `index add` time post-verification; the index carries the read-optimized
+  projection (search never touches DDIs).
+- **Every index is always signed.** The "local vs shared" distinction is
+  illusory: an index lives on a disk, and a disk can be a USB drive moved to
+  another computer — at which point it *is* an external index. No
+  sign-on-share laziness; the collection key is created at an explicit
+  collection-init ceremony.
+- **Tool split ratified** (→ **ADR-0039**, reversing ADR-0031's one-codebase
+  preference): **buildctl builds DDIs; appctl runs DDIs; a third (unnamed)
+  tool manages getting DDIs onto the system** (indexing, subscriptions,
+  import, search). Shared schema/DDI-reading code becomes a common module.
+
+### Open / parked from this round
+
+- **The third tool's name** — parked. "indexctl" felt opaque; possibly the
+  *index* noun itself deserves a better name. Revisit.
+- **Verb-boundary detail:** `up --get` composition now crosses tool
+  boundaries (acquisition belongs to the third tool) — does appctl shell
+  out, or does the composition flag die? Undecided.
+- **OL OS ships the tools as their own sysext DDI** with the project cert
+  baked into the host OS for first trust — so tool updates never require a
+  RAUC image rebuild. OS-side concern, not a tools concern (T105 refined;
+  OS-CONFORMANCE updated).
+
+---
+
+## 23. One binary (2026-07-05) → ADR-0040
+
+**Ratified: the three Go tools become one binary** with one namespace per
+leg (build / index / lifecycle); ADR-0039's separation survives as
+namespaces and package layout. **The name is parked — deliberately not
+chosen now** ("it's not important now"); until it lands, "buildctl" and
+"appctl" are working titles for the namespaces. **`boxctl` and the bash
+framework are not part of this setup at all** — they are operating-system
+components (a completely different CLI belonging to OL OS), outside the
+product's three legs.
+
+Why the old monolith rejection no longer holds (all three premises
+dissolved): the CGO_ENABLED conflict died with the pure-Go pipeline
+(ADR-0031); cross-compiling one CGO-free codebase to macOS + arm64 is
+trivial; Docker/portablectl are runtime deps of individual verbs, not the
+binary. New forces for bundling: shared on-device state + local index
+(two binaries over one state = version-skew bugs), the `up --get`
+cross-tool composition (now resolved naturally), T105's single sysext, the
+one-person release train, and the dissolved "indexctl" naming problem.
+Accepted cost: one ~15–25 MB static binary on the smallest targets
+(replaces three; device-slim build-tag variant possible later); leg
+discipline enforced by convention instead of binary walls.
+`rejected/monolithic-cli.md` carries the reversal note.
+
+---
+
+## 24. Schema-review rulings (2026-07-06)
+
+From the T95 review:
+
+- **`spec_version` is major.minor** ("some semver here: major and minor
+  changes in the spec version") — current `"1.0"`, minor = compatible
+  additions, major = breaking. Applies to the manifest and both index
+  documents. Optional in the manifest (defaults `1.0`).
+- **`category` is killed entirely** — "I don't see how we add any value
+  using categories." Amends §21 (which had kept one optional predefined
+  category); search is `name` + `description` text matching, nothing else.
+  Index-contract open item 5 (curating the list) dissolves.
+- **`sbom_url` stays** (optional pointer; relates to parked T106).
+- **Hook units may also be `.mount` / `.automount`** (operator addition to
+  the suffix set).
+- **No committed test keys/certs, ever** (T100 ruling): tests **regenerate**
+  keys and certs at runtime — dummy cryptographic material in the repo
+  "will break every security linter possible."
 
 Reviewed the rest of the UAPI family (UAPI.8 package-metadata ELF notes,
 UAPI.9 file-system hierarchy, UAPI.11 verification-of-OS-artifacts hierarchy,

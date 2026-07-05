@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted |
+| **Status** | Accepted — amended by ADR-0037 (2026-07-05): the carrier/curator model, never-merge rule, and stale-catalog handling are replaced by subscribe + import; the index signature is integrity/anti-freeze, **never trust** (trust rides the build signature); delegation-by-inclusion demoted to cert distribution. Terminology and the two-gate frame stand |
 | **Date** | 2026-07-05 |
 | **Deciders** | Offline Lab core team |
 | **Supersedes** | Amends ADR-0008, ADR-0009, ADR-0010 (terminology + refinements) |

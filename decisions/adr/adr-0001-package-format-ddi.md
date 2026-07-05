@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted — amended by ADR-0034 (2026-07-05): UAPI.3 adopted verbatim as substrate |
+| **Status** | Accepted — amended by ADR-0034 (2026-07-05): UAPI.3 adopted verbatim as substrate. Further amended by ADR-0038 (2026-07-05): **the package is a single `.raw` file** — the standalone metadata `.json` is removed; the embedded manifest (ADR-0017) is the DDI metadata |
 | **Date** | 2026-06-16 |
 | **Deciders** | Offline Lab core team |
 | **Supersedes** | None (replaces a prior 5-file format, not another ADR) |

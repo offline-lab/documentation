@@ -52,8 +52,9 @@ nav = [
       { "Terminology" = "terminology.md" },
     ]},
     { "Specifications" = [
+      { "App contract" = "specs/app-contract.md" },
+      { "Index contract" = "specs/index-contract.md" },
       { "Package format" = "specs/package-format.md" },
-      { "Repository" = "specs/repository.md" },
       { "Build" = "specs/build.md" },
       { "Lifecycle hooks" = "specs/lifecycle.md" },
       { "Security model" = "specs/security-model.md" },

@@ -1,509 +1,182 @@
 # Package Format
 
-> **Amended (2026-07-05).** The DDI core of this page is **affirmed**
-> ([ADR-0034](https://github.com/offline-lab/documentation/blob/main/decisions/adr/adr-0034-uapi-substrate.md)
-> adopts UAPI.3 verbatim). New and normative on top: layered apps are **UAPI.4
-> sysexts** (`extension-release.d/`, `SYSEXT_SCOPE=portable`, exact
-> `ID`/`SYSEXT_LEVEL`/`ARCHITECTURE` match, max 3 layers, no base-on-base
-> stacking); versions follow **UAPI.10** (not semver); build tooling changed
-> (ADR-0031). The manifest floor shrank (storage/runtime/unit have defaults) —
-> field-level spec pending.
-
-An Offline Lab package is a systemd portable service packaged as a **DDI**
-(Discoverable Disk Image, [UAPI.3](https://uapi-group.org/specifications/specs/discoverable_disk_image/))
-plus a separate metadata JSON. buildctl produces the package; appctl consumes it.
-
-The DDI is a GPT partition image containing three partitions — root, verity, and
-signature — bundling the squashfs filesystem, its dm-verity hash tree, and the
-PKCS7 signature of the roothash into a single `.raw` file. systemd discovers and
-verifies the image natively: there are no companion files and no custom verity or
-PKCS7 verification code at runtime.
-
-See [Security Model](security-model.md) for the trust chain and verification flow,
-and [Build](build.md) for how the DDI is produced.
+**Status:** rewritten 2026-07-05 against the
+[App contract](app-contract.md) and ADR-0034/0037/0038 (T98). This page
+specifies the **wire format**: what the file *is*. What makes it an *app*
+(manifest fields, run intent, storage, conformance) is the app contract;
+how it is catalogued and distributed is the [Index contract](index-contract.md).
 
 ---
 
-## File set
+## One file
 
-Every package consists of two files:
-
-```
-<name>_<version>_<arch>.raw      ← DDI (GPT: root squashfs + verity + signature partitions)
-<name>_<version>_<arch>.json     ← package metadata
-```
-
-Both files must be present and co-located. appctl extracts them to the permanent
-images directory at `/var/lib/appctl/images/<uuid>/` on install; the DDI is
-staged as a single `.raw` file. The metadata JSON is the source of truth for
-appctl at install time.
-
-**Transport:** for download or USB transfer, both files are wrapped in a zip:
+**A package is a single file:**
 
 ```
-<name>_<version>_<arch>.zip
+<name>_<version>_<arch>.raw
 ```
 
-appctl extracts the zip once to the images directory; the zip is not retained.
+It is a **DDI** ([UAPI.3](https://uapi-group.org/specifications/specs/discoverable_disk_image/)):
+a GPT image containing the root filesystem, its dm-verity hash tree, and the
+PKCS7 signature over the roothash — self-describing, self-verifying, signed.
+There is **no metadata file beside it and no transport wrapper** (ADR-0038):
+the package metadata is the manifest embedded *inside* the image, and the
+payload is already compressed (zstd squashfs / erofs), so no `.zip` exists.
+systemd discovers and verifies the image natively; no custom verification
+code exists anywhere in the tools.
 
----
+## DDI layout
 
-## DDI format
+A GPT (with **protective MBR** — without it `systemd-dissect` cannot
+identify the image) and exactly three partitions, per the
+[Discoverable Partitions Specification (UAPI.2 / DPS)](https://uapi-group.org/specifications/specs/discoverable_partitions_specification/):
 
-The `.raw` file is a GPT (GUID Partition Table) image with a protective MBR and
-exactly three partitions, per the [Discoverable Partitions Specification
-(UAPI.2 / DPS)](https://uapi-group.org/specifications/specs/discoverable_partitions_specification/):
-
-| # | Partition | Contents | Discovered by systemd as |
+| # | Partition | Contents | Discovered as |
 |---|---|---|---|
-| 1 | Root | squashfs (or erofs) filesystem — the portable service image | `root-<arch>` |
+| 1 | Root | squashfs (or erofs) filesystem | `root-<arch>` |
 | 2 | Verity | dm-verity superblock + hash tree over partition 1 | `root-<arch>-verity` |
-| 3 | Signature | JSON binding the roothash to a PKCS7 signature (see below) | `root-<arch>-verity-sig` |
+| 3 | Signature | JSON binding the roothash to a PKCS7 signature | `root-<arch>-verity-sig` |
 
-systemd-dissect discovers each partition by its **type UUID** (see below). The
-hash tree that previously shipped as a verity sidecar file now lives in
-partition 2; the roothash and its PKCS7 signature, previously separate sidecar
-files, now live together in partition 3.
+Discovery is by **partition type UUID only**; names/labels are informational.
 
 ### Partition type UUIDs
 
-Partition type UUIDs are arch-specific and defined by UAPI.2 (DPS). buildctl
-selects them based on the package `arch`:
+Type UUIDs are arch-specific, defined by DPS. Live-verified values:
 
-| Arch | Root | Verity | Verity-sig |
-|---|---|---|---|
-| `arm64` | `B921B045-1DF0-41C3-AF44-4C6F280D3FAE` | `DF3300CE-D69F-4C92-978C-9BFB0F38D820` | `6DB69DE6-29F4-4758-A7A5-962190F00CE3` |
-| `amd64` | `4F68BCE3-E8CD-4DB1-96E7-FBCAF984B709` | `933AC7E1-2EB4-4F13-B844-0E14E2AEF915` | `D4E7CEDE-7F4D-4C7B-9B87-1B7A03A6AB63` |
+| Arch | Root | Verity | Verity-sig | Verified |
+|---|---|---|---|---|
+| `arm64` | `B921B045-1DF0-41C3-AF44-4C6F280D3FAE` | `DF3300CE-D69F-4C92-978C-9BFB0F38D820` | `6DB69DE6-29F4-4758-A7A5-962190F00CE3` | ✓ live test, systemd 259 / Fedora 44 |
 
-Partition names/labels (e.g. `root-arm64-verity-sig`) are informational; discovery
-is by type UUID only. The verity-sig UUIDs above are verified against
-systemd-repart output on Fedora 44 — some online sources list incorrect values.
+> **Other arches:** take the values from DPS / `systemd-repart` output on the
+> target — do **not** copy them from secondary sources. A previous revision of
+> this page listed an amd64 verity UUID that was actually DPS's *home*
+> partition type; online sources get these wrong. Verify before use.
 
-The GPT must include a **protective MBR** (`ProtectiveMBR: true` when building
-with go-diskfs), otherwise systemd-dissect cannot identify the image.
+### Partition GUIDs encode the roothash
 
-### Partition UUID encoding (roothash binding)
+Per DPS, the **partition GUIDs** (unique IDs, distinct from the type UUIDs)
+of the root and verity partitions are derived from the roothash:
 
-Per DPS, the **partition GUIDs** (the unique partition identifiers, distinct from
-the arch-specific type UUIDs above) of the root and verity partitions encode the
-roothash:
+- Root partition GUID = **first** 128 bits of the roothash
+- Verity partition GUID = **last** 128 bits of the roothash
 
-- **Root partition GUID** = first 128 bits (16 bytes) of the roothash
-- **Verity partition GUID** = last 128 bits (16 bytes) of the roothash
-
-This binds each partition cryptographically to the roothash that protects it.
-After systemd loads the signature partition and obtains the roothash, it verifies
-both partition GUIDs against the roothash-derived values. buildctl therefore
-computes the roothash **before** writing the GPT and sets both partition GUIDs
-accordingly. This is not optional — it is enforced by systemd; mismatched GUIDs
-cause attach/mount to fail.
-
-Example (from a live verification on systemd 259):
+systemd **enforces** this: mismatched GUIDs make attach fail. The assembler
+therefore computes the roothash before writing the GPT. Live-verified
+example (systemd 259):
 
 ```
 Roothash:  ef87a379dc7560ab95325f7ef84d0d45a0e8d81ba68e64dfaa1ff69dba8c82cb
-
-Root partition:
-  GUID:     ef87a379-dc75-60ab-9532-5f7ef84d0d45
-            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ = first 128 bits
-
-Verity partition:
-  GUID:     a0e8d81b-a68e-64df-aa1f-f69dba8c82cb
-                                          ^^^^^^^^^^^^^^^^^^^ = last 128 bits
+Root   GUID: ef87a379-dc75-60ab-9532-5f7ef84d0d45   (first 128 bits)
+Verity GUID: a0e8d81b-a68e-64df-aa1f-f69dba8c82cb   (last 128 bits)
 ```
 
 ### Signature partition
 
-The signature partition contains a single JSON object that binds the roothash to
-a PKCS7 signature produced by the build key:
+A single JSON object binding the roothash to the build signature:
 
 ```json
 {
-  "rootHash": "<hex>",
-  "signature": "<base64 PKCS7>",
-  "certificateFingerprint": "<sha256 hex>"
+  "rootHash": "<lowercase hex>",
+  "signature": "<base64 DER PKCS7>"
 }
 ```
 
-| Field | Format | Notes |
+The PKCS7 blob carries the signer's certificate, which enables
+show-and-accept at import (ADR-0037); trust still comes only from the
+consumer's accepted-cert store (`/etc/verity.d/`, VOA — see
+[Security model](security-model.md)). systemd verifies the signature
+natively (`validate_signature_userspace()`), then activates dm-verity;
+the kernel enforces block integrity at runtime.
+
+> **PKCS7 digest MUST be SHA-256.** OpenSSL 3.x rejects SHA-1 digests
+> ("invalid digest") under default security policies. Any signer used by the
+> build pipeline must produce SHA-256 PKCS7.
+
+Additional JSON fields in this partition are ignored by systemd; producers
+should emit the two standard fields.
+
+## Two package shapes
+
+| | Fat app | Layered app |
 |---|---|---|
-| `rootHash` | lowercase hex string | The dm-verity roothash of partition 1 |
-| `signature` | base64-encoded DER PKCS7 | PKCS7 signature over `rootHash`, produced at build time by buildctl with `go.mozilla.org/pkcs7`. **MUST use SHA256** as the digest algorithm — see note below |
-| `certificateFingerprint` | lowercase sha256 hex | SHA-256 of the DER-encoded signing certificate; identifies which build key signed this package and drives per-key cert lookup during key rotation |
+| Carries | complete userland | only the app's own files |
+| Identity file | `/etc/os-release` (`ID=<name>`, `VERSION_ID=<version>`) | `/usr/lib/extension-release.d/extension-release.<name>` — **no os-release** |
+| Runs | alone | on exactly **one base** (2 layers max, ADR-0034 §20) |
+| Extra rules | — | [UAPI.4](https://uapi-group.org/specifications/specs/extension_image/) sysext: `ID=` equals the base's (never `_any`), `SYSEXT_LEVEL=` (the base's ABI promise), `ARCHITECTURE=`, `SYSEXT_SCOPE=portable`; **purely additive** over the base (file overlap = build error) |
 
-systemd reads this partition, verifies the PKCS7 signature against certificates
-installed under `/etc/verity.d/` (see [Security Model](security-model.md)), and
-uses the verified roothash to activate dm-verity over partition 1. There is no
-verification code in appctl — systemd performs the verification natively via
-`validate_signature_userspace()` in `src/shared/dissect-image.c`. The kernel
-enforces block integrity at runtime via dm-verity.
+Bases themselves are specified separately (T96); a base is a UAPI.4-matchable
+base DDI, independently signed — it vouches for itself.
 
-> **PKCS7 digest algorithm: SHA256.** `go.mozilla.org/pkcs7` v0.9.0 defaults to
-> SHA1. OpenSSL 3.x (used by systemd for userspace verity verification) rejects
-> SHA1 with "invalid digest" because SHA1 is disabled in the default security
-> provider. buildctl MUST call
-> `SetDigestAlgorithm(pkcs7.OIDDigestAlgorithmSHA256)` before signing.
+## DDI metadata (the embedded manifest)
 
----
+The manifest (`package.yaml`) is embedded at
+`/usr/share/<name>/package.yaml` (ADR-0017) and **is** the package
+metadata — "DDI metadata," an essential part of the format. Field semantics
+live in the [App contract](app-contract.md); machine-validatable shapes in
+the JSON schemas (T95).
 
-## Root partition content (squashfs) constraints
+Reading it follows the ADR-0038 order — **verification first, always**:
 
-The DDI does not change the filesystem contents — it only changes the wrapper.
-The root partition contains a squashfs filesystem subject to the same constraints
-that have always applied to Offline Lab portable service images. The full content
-spec lives in [App Filesystem Layout](../app-filesystem.md); summarized:
+1. Probe the GPT (type UUIDs; no content read).
+2. Verify the PKCS7 signature against the accepted-cert store.
+3. Verity-verify the root partition.
+4. Only then extract the manifest (`systemd-dissect --copy-from`, image
+   policy enforced).
 
-- **All files owned `root:root`** (uid 0, gid 0). buildctl forces this via
-  `SetOwner(path, 0, 0)` when writing the squashfs.
-- `/etc/os-release` with `ID=<name>` and `VERSION_ID=<version>` matching the
-  package metadata exactly. (Required by portablectl for image identification.)
-- `/usr/lib/systemd/system/<name>.service` — the main service unit. Unit files
-  must **not** contain `User=` or `Group=` directives; appctl injects the
-  allocated runtime user via a drop-in at install time (portable mode only).
-- `/usr/lib/systemd/system/<name>.socket` when `socket_activation: true`.
-- `/usr/share/<name>/package.yaml` — the build-time package definition, embedded
-  by buildctl for build-time provenance without requiring the source repository.
-- All lifecycle hook unit files declared in the metadata.
+Filenames are untrusted; identity comes from the verified manifest. Indexes
+project the searchable fields out of the manifest once, at `index add` —
+nothing ever scans DDIs at search or resolution time.
 
-Services must not perform internal privilege dropping (`setuid`/`setgid`/`initgroups`
-to a named user defined in the image's own `/etc/passwd`), and every runtime-writable
-path must be declared as a volume in `package.yaml`. See
-[App Filesystem Layout](../app-filesystem.md) for the rationale and details.
+## Root partition content constraints
 
----
+Summarized from the [App contract](app-contract.md) (conformance §):
 
-## Naming convention
+- All files owned `root:root` (ADR-0014).
+- Identity file per the package shape (exactly one of the two).
+- `/usr/lib/systemd/system/<name>.service` (and `<name>.socket` iff
+  `socket_activation`); every declared lifecycle-hook unit exists.
+- **No `User=`/`Group=`** in any unit (ADR-0015) and **no host-path mounts**
+  — the runtime's generated drop-in owns placement (ADR-0036).
+- Empty mount-point dirs `/etc/<name>/` and `/var/lib/<name>/` exist
+  (bind targets; a mount point cannot be created on a read-only squashfs).
+- Optional pristine config defaults at `/usr/share/factory/etc/<name>/`
+  (seeded into the config volume on first provision).
+- The embedded manifest at `/usr/share/<name>/package.yaml`.
+- Layered shape: additive over the base — no file overlap.
+
+## Naming
 
 | Field | Rules | Example |
 |---|---|---|
-| `name` | Lowercase, alphanumeric and hyphens only; must start with alphanumeric | `mosquitto` |
-| `version` | Valid semver | `2.0.18` |
-| `arch` | Enum: `arm64`, `armv7`, `armv6`, `amd64` | `arm64` |
+| `name` | lowercase, alphanumeric + hyphens, starts alphanumeric | `mosquitto` |
+| `version` | [UAPI.10](https://uapi-group.org/specifications/specs/version_format_specification/) (`~` pre-release, `^` post-release) — **not semver**. The version of the *DDI*, not of the software inside | `2.0.18` |
+| `arch` | open, pattern-validated string; officially supported set documented separately | `arm64` |
 
-The three fields are joined with an **underscore** separator (per UAPI.3), not a
-hyphen:
+Joined with **underscores** (UAPI.3): `mosquitto_2.0.18_arm64.raw`.
 
-```
-mosquitto_2.0.18_arm64.raw
-mosquitto_2.0.18_arm64.json
-mosquitto_2.0.18_arm64.zip
-```
+This naming is **`systemd-vpick`-native**: a `mosquitto.raw.v/` directory of
+such files is resolved to the newest version by systemd itself
+(UAPI.10 ordering, arch filtering) — relevant to the upgrade design (T103).
 
----
-
-## package.yaml
-
-`package.yaml` is the build-time package definition. Package authors write it;
-buildctl reads it to build the DDI and generate the metadata JSON.
-
-buildctl embeds `package.yaml` inside the root partition at
-`/usr/share/<name>/package.yaml`. This provides build-time provenance without
-requiring access to the source repository. The Dockerfile (if any) is not
-included; publishing it is the maintainer's responsibility.
-
-Fields not set in `package.yaml` fall back to Docker labels baked into the image
-(see [Build: Dockerfile labels](build.md#dockerfile-labels-optional)), then to
-defaults where applicable.
-
-### Field reference
-
-**Identity**
-
-| Field | Type | Required | Notes |
-|---|---|---|---|
-| `spec_version` | string | yes | Always `"1"` |
-| `name` | string | yes | Lowercase, alphanumeric + hyphens |
-| `version` | string | yes | Semver |
-| `arch` | string | yes | See naming convention above |
-| `description` | string | yes | Single line |
-| `homepage` | string | no | URL |
-| `license` | string | no | SPDX identifier (e.g. `Apache-2.0`) |
-| `tags` | string[] | no | Used for repo search and filtering |
-
-**Publisher and contact**
-
-| Field | Type | Required | Notes |
-|---|---|---|---|
-| `publisher` | string | yes | Publisher organisation (e.g. `offline-lab`) |
-| `publisher_url` | string | no | Publisher homepage URL |
-| `maintainer` | string | no | Package maintainer, format `"Name <email>"` |
-| `source_url` | string | no | Source repository URL |
-| `security_contact` | string | no | Email or URL for vulnerability reports |
-| `sbom_url` | string | no | URL to a published SBOM for this package |
-
-**Runtime**
-
-| Field | Type | Required | Default | Notes |
-|---|---|---|---|---|
-| `runtime` | string | no | `portable` | `portable` or `nspawn`. Selects how appctl runs the image (see below) |
-| `network` | string | no | `host` | `host`, `private`, or `none`. Only meaningful when `runtime: nspawn`; ignored for `portable` |
-| `command` | string | no | — | Absolute path to the service entrypoint. Used to auto-generate the service unit when no unit file is provided in `rootfs/` or backend output |
-| `systemd_profile` | string | no | `strict` | `default`, `strict`, `trusted`, `nonetwork`, `custom` |
-| `socket_activation` | boolean | no | `false` | If true, a `.socket` unit must exist inside the root partition |
-
-**Runtime modes.** `runtime: portable` (default) attaches the DDI with
-`portablectl attach`; appctl allocates a dedicated `app<uid>` system user and
-generates a drop-in (`User=`, `Group=`, `BindPaths=`, `RootImage=`).
-`runtime: nspawn` runs the image under `systemd-nspawn`; isolation is via PID /
-mount / network namespaces and there is no per-app uid allocation (the process
-inside the container is root in the namespace). The `network` field only applies
-to nspawn mode. Both modes use the same DDI and the same `/etc/verity.d/` cert
-store; systemd re-verifies the signature and re-sets up dm-verity in both paths.
-
-`systemd_profile: "custom"` means the unit files inside the root partition carry
-their own security directives. The tooling attaches with `--profile=default` as a
-baseline. Full security responsibility shifts to the app author. Custom-profile
-packages are flagged in `appctl list` output and in the repo index.
-
-**Service unit precedence.** If the developer provides a service unit (in
-`rootfs/` or in backend output), it takes precedence and `command` is ignored.
-`command` is only consulted to auto-generate a unit when none is present.
-
-**Volumes**
-
-| Field | Type | Required | Notes |
-|---|---|---|---|
-| `volumes.config` | string | no | Namespace path for the config volume (e.g. `/etc/mosquitto`) |
-| `volumes.data` | string | no | Namespace path for the data volume (e.g. `/var/lib/mosquitto`) |
-
-Exactly two keys: `config` and `data`. No freeform paths. appctl generates `BindPaths=`
-from these at install time and backs them with persistent storage under
-`/var/lib/appctl/apps/<hash>/<name>/`. See [User Allocation](user-allocation.md)
-for the system path layout and drop-in format.
-
-Apps log via stderr/stdout to the systemd journal. No log volume is provided.
-
-**Ports** (array, may be empty)
-
-| Field | Type | Required | Notes |
-|---|---|---|---|
-| `port` | integer | yes | 1–65535 |
-| `protocol` | string | yes | `tcp` or `udp` |
-| `description` | string | no | |
-| `expose` | boolean | yes | If true, an nftables accept rule is applied on install |
-
-**Devices** (array, may be empty)
-
-| Field | Type | Required | Notes |
-|---|---|---|---|
-| `type` | string | yes | `audio`, `video`, `bluetooth`, `gpio`, `i2c`, `spi`, `serial`, `usb` |
-| `required` | boolean | yes | If false, service starts even if device is absent |
-| `description` | string | no | |
-
-**Resources** (optional)
-
-Declares expected resource usage at three load levels. Used by appctl for pre-install
-capacity checks. See [Resource Tracking](resource-tracking.md).
-
-```yaml
-resources:
-  low:
-    cpu_percent: 2
-    memory_mb: 24
-    storage_mb: 45
-  moderate:
-    cpu_percent: 15
-    memory_mb: 64
-    storage_mb: 45
-  heavy:
-    cpu_percent: 40
-    memory_mb: 128
-    storage_mb: 45
-```
-
-If omitted, appctl skips the resource check and proceeds with a warning.
-
-**Lifecycle** (optional)
-
-Each value is a systemd unit name that must exist inside the root partition. Omit
-any hook the app does not need. Omit the entire `lifecycle:` block if the app has
-no hooks. See [Lifecycle Hooks](lifecycle.md) for sequencing and execution
-context.
-
-| Field | When appctl starts it |
-|---|---|
-| `pre_start` | After portablectl attach, before enable and first start |
-| `post_start` | After the service is running for the first time |
-| `pre_update` | After new image is attached, before service restart |
-| `post_update` | After the service is running on the new image |
-| `pre_remove` | Before the service is stopped and the image is detached |
-
-**Build options**
-
-| Field | Type | Notes |
-|---|---|---|
-| `strip.enabled` | boolean | Remove unused shared libraries after build. Default false. |
-| `strip.keep` | string[] | Library paths to preserve during stripping (e.g. dlopen'd libs). |
-
-`strip` is build-time only; it does not appear in the generated metadata JSON.
-
-### Full example
-
-```yaml
-spec_version: "1"
-
-name: mosquitto
-version: 2.0.18
-arch: arm64
-description: Lightweight MQTT broker
-homepage: https://mosquitto.org
-license: EPL-2.0
-tags: [networking, mqtt, iot]
-
-publisher: offline-lab
-publisher_url: https://offline-lab.com
-maintainer: "Flip Hess <flip@fliphess.com>"
-source_url: https://github.com/offline-lab/apps
-security_contact: security@offline-lab.com
-sbom_url: ~
-
-runtime: portable
-systemd_profile: strict
-socket_activation: false
-
-volumes:
-  config: /etc/mosquitto
-  data:   /var/lib/mosquitto
-
-ports:
-  - port: 1883
-    protocol: tcp
-    description: MQTT
-    expose: true
-
-devices: []
-
-resources:
-  low:      { cpu_percent: 2,  memory_mb: 24,  storage_mb: 45 }
-  moderate: { cpu_percent: 15, memory_mb: 64,  storage_mb: 45 }
-  heavy:    { cpu_percent: 40, memory_mb: 128, storage_mb: 45 }
-
-# lifecycle: omitted (mosquitto uses ExecStartPre= in its unit file for first-run init)
-```
-
----
-
-## Metadata JSON
-
-The metadata JSON (`<name>_<version>_<arch>.json`) is generated by buildctl from
-`package.yaml` and is **immutable after publication**. It is the source of truth
-for appctl at install time. It does not duplicate information that lives inside
-the root partition (unit file directives, internal capabilities); only fields the
-tooling needs to act on.
-
-The metadata JSON does not carry the signature. Signing lives inside the DDI
-signature partition (see above), not in the metadata JSON. The metadata JSON also
-does not include `uid` or `gid` — user allocation is appctl's responsibility at
-install time, not the package author's. See [User Allocation](user-allocation.md).
-
-### Field reference
-
-All fields from `package.yaml` carry over to the metadata JSON, except `strip`
-(build input only). The following fields are added by buildctl at build time:
-
-| Field | Type | Notes |
-|---|---|---|
-| `format_version` | string | Package format version. `"1"` = DDI format. Distinguishes this from the legacy 5-file format (which had no `format_version`). |
-| `ddi_artifact` | string | DDI filename: `<name>_<version>_<arch>.raw`. |
-| `ddi_sha256` | string | SHA-256 of the `.raw` DDI file, lowercase hex. Download-integrity check, independent of the PKCS7 signature. |
-| `ddi_size` | integer | Size of the `.raw` DDI file in bytes (GPT + root squashfs + verity + signature partitions). Used for pre-install storage checks. |
-| `created_at` | string | ISO 8601 build timestamp. |
-
-The following fields carry over from the new `package.yaml` runtime block when set:
-
-| Field | Type | Notes |
-|---|---|---|
-| `runtime` | string | Always present in metadata (buildctl defaults to `"portable"`). Enum `["portable", "nspawn"]`. |
-| `network` | string | Present only when `runtime = "nspawn"` and the author set it; otherwise omitted. |
-| `command` | string | Present only when the author set it in `package.yaml`; kept for traceability. |
-
-The following field is reserved (nullable in v1) for key rotation:
-
-| Field | Notes |
-|---|---|
-| `signing_key_id` | Reserved. Will identify the fingerprint (SHA-256 of the DER certificate) of the build key that signed the DDI signature partition. See [Security Model](security-model.md). |
-
-### Full example
-
-```json
-{
-  "spec_version": "1",
-
-  "name": "mosquitto",
-  "version": "2.0.18",
-  "arch": "arm64",
-  "description": "Lightweight MQTT broker",
-  "homepage": "https://mosquitto.org",
-  "license": "EPL-2.0",
-  "tags": ["networking", "mqtt", "iot"],
-
-  "publisher": "offline-lab",
-  "publisher_url": "https://offline-lab.com",
-  "maintainer": "Flip Hess <flip@fliphess.com>",
-  "source_url": "https://github.com/offline-lab/apps",
-  "security_contact": "security@offline-lab.com",
-  "sbom_url": null,
-
-  "signing_key_id": null,
-
-  "format_version": "1",
-  "ddi_artifact": "mosquitto_2.0.18_arm64.raw",
-  "ddi_sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
-  "ddi_size": 5242880,
-  "created_at": "2026-01-15T10:00:00Z",
-
-  "runtime": "portable",
-  "systemd_profile": "strict",
-  "socket_activation": false,
-
-  "volumes": {
-    "config": "/etc/mosquitto",
-    "data": "/var/lib/mosquitto"
-  },
-
-  "ports": [
-    {
-      "port": 1883,
-      "protocol": "tcp",
-      "description": "MQTT",
-      "expose": true
-    }
-  ],
-
-  "devices": [],
-
-  "resources": {
-    "low":      { "cpu_percent": 2,  "memory_mb": 24,  "storage_mb": 45 },
-    "moderate": { "cpu_percent": 15, "memory_mb": 64,  "storage_mb": 45 },
-    "heavy":    { "cpu_percent": 40, "memory_mb": 128, "storage_mb": 45 }
-  }
-}
-```
-
----
-
-## Path resolution
-
-All paths use standard Linux FHS conventions. On Offline Lab OS, the standard
-FHS paths are bind-mounted from persistent `/data/` storage at boot, because
-`/etc` is ephemeral (its overlayfs upper is wiped each boot). On any other
-systemd host these paths work natively. The complexity lives in the OS layer,
-not in appctl.
+## Host paths (consumer side)
 
 | Purpose | Path |
 |---|---|
-| Staged DDI images | `/var/lib/appctl/images/<uuid>/` |
-| Per-app persistent storage | `/var/lib/appctl/apps/<hash>/<name>/` |
-| appctl state (file-per-record JSON) | `/var/lib/appctl/state/` |
-| Signing cert store | `/etc/verity.d/` |
+| App storage (config/data) | `<root>/apps/<index-hash>/<name>/` — relocatable `<root>`, default `/var/lib/appctl` (ADR-0035) |
+| Runtime state | file-per-record under `<root>` (ADR-0026); source of truth for `recover` |
+| Trust store (up-gate) | `/etc/verity.d/` (systemd-consumed today) |
+| Tool trust material | VOA hierarchy (UAPI.11), per ADR-0034 |
 
----
+On Offline Lab OS the persistence of these paths is the OS's duty
+(`OS-CONFORMANCE.md`); the format knows nothing about overlay wipes.
 
 ## Standards references
 
-| Spec | Title | Relevance |
-|---|---|---|
-| [UAPI.2](https://uapi-group.org/specifications/specs/discoverable_partitions_specification/) | Discoverable Partitions Specification (DPS) | Partition type UUIDs for root / verity / verity-sig; partition GUID encoding of the roothash |
-| [UAPI.3](https://uapi-group.org/specifications/specs/discoverable_disk_image/) | Discoverable Disk Images (DDI) | The overall DDI format and the underscore naming convention |
-| [UAPI.11](https://uapi-group.org/specifications/specs/file_hierarchy_for_the_verification_of_os_artifacts/) | Verification of OS Artifacts (VOA) | Future: native cert hierarchy for verity. Currently superseded for Offline Lab by the systemd `verity.d/` flow |
-| systemd | Userspace dm-verity cert verification | `src/shared/dissect-image.c`, `validate_signature_userspace()` |
+| Spec | Relevance |
+|---|---|
+| [UAPI.2 (DPS)](https://uapi-group.org/specifications/specs/discoverable_partitions_specification/) | partition type UUIDs; roothash-derived partition GUIDs |
+| [UAPI.3 (DDI)](https://uapi-group.org/specifications/specs/discoverable_disk_image/) | the image format; underscore naming |
+| [UAPI.4 (Extension Images)](https://uapi-group.org/specifications/specs/extension_image/) | layered-app shape (sysext, extension-release matching) |
+| [UAPI.10 (Version Format)](https://uapi-group.org/specifications/specs/version_format_specification/) | version syntax + ordering |
+| [UAPI.11 (VOA)](https://uapi-group.org/specifications/specs/file_hierarchy_for_the_verification_of_os_artifacts/) | trust-material layout (tool-side now; up-gate when systemd consumes VOA — T99) |
+| systemd | `systemd-dissect`, `validate_signature_userspace()`, `systemd-vpick` |

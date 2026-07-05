@@ -8,7 +8,10 @@
 > the appctl verb model (§9's install/update/remove flows → ADR-0032's
 > get/up/down/rm/drop; `rehydrate` → `recover`), base lifecycle amendments
 > (orphaned bases kept by default, bases not user-deletable while referenced),
-> and terminology (repo → index, ADR-0033). Read with those on top.
+> and terminology (repo → index, ADR-0033). **Further amended (2026-07-05,
+> session §20): the intermediate language layer (§3.3 layer 1) is removed —
+> the cap is 1 base + the app; language flavors (`debian-python`) are flat,
+> complete bases.** Read with those on top.
 
 **Status:** Approved design, pending implementation.
 **Session:** 2026-06-18.

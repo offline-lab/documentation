@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted |
+| **Status** | Accepted — amended 2026-07-05 (design session §18): hook stages become **ordered lists** of units; stage set redefined (`pre_start`/`post_start`/`pre_stop`/`post_stop`/`pre_drop`; upgrade stages in T103); explicit-or-absent principle unchanged |
 | **Date** | 2026-06-16 |
 | **Deciders** | Offline Lab core team |
 | **Supersedes** | None |

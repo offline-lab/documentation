@@ -33,9 +33,11 @@ curation, trust, distribution, and lifecycle **on top** of them:
     aligned to how the distro versions (Debian stable point releases share a
     level). An exact build-base identity may be recorded as audit metadata
     only; it never gates the runtime.
-  - We are a **stricter subset**: max 3 layers — one distro base + optional
-    runtime/language layer + the app (affirms ADR-0028's cap; an artificial
-    complexity guard, not a fundamental limit). No base-on-base stacking.
+  - We are a **stricter subset**: max **2 layers — one distro base + the
+    app** (amended 2026-07-05, session §20: the runtime/language layer was
+    removed; language variety is flat base flavors like `debian-python`).
+    An artificial complexity guard, not a fundamental limit. No base-on-base
+    stacking.
   - confext is **not** used for app config — config is the mutable
     operator-owned bind-mount (ADR-0035). Host sysext/confext remain
     boxctl-managed (ADR-0023, unchanged).
@@ -43,6 +45,32 @@ curation, trust, distribution, and lifecycle **on top** of them:
   post-release; `systemd-analyze compare-versions` is the reference
   comparator, present on every target host. "Latest" in an index = maximum by
   UAPI.10 ordering. **Supersedes the old "version must be semver" rule.**
+
+Extended 2026-07-05 (session §16 audit, ratified):
+
+- **UAPI.9 (File System Hierarchy)** — the *inside-the-image* half of the
+  storage contract (outside = ADR-0035): config mounts at `/etc/<name>/`,
+  data at `/var/lib/<name>/`; apps ship pristine defaults at
+  `/usr/share/factory/etc/<name>/` and appctl seeds the config volume from
+  there on first provision. Cache is flushable and logs go to journald, so
+  the two volume keys remain sufficient. The mounts are per-unit namespace
+  bind mounts (`BindPaths=` in appctl's drop-in) — nothing writes to any
+  host or image `/etc`; **the image must ship the empty mount-point
+  directories** (created by buildctl; a mount point cannot be created on a
+  read-only squashfs at runtime).
+- **UAPI.11 (Verification of OS Artifacts)** — the layout for trust
+  material, two-step: appctl's own store (pinned index keys =
+  `trust-anchor-repository-metadata`, delegated build certs, per-index
+  `$context` scoping) uses the `voa/` hierarchy **now**; the up-gate stays on
+  `/etc/verity.d/` (what systemd consumes today) and migrates when systemd
+  reads VOA — tracked as T99, closing ADR-0033's flat-store caveat.
+- **Configuration Files spec** (reference impl: libeconf) — our tools' own
+  config follows vendor-defaults + `/etc` override + `.d/` drop-ins +
+  `/dev/null` masking (Go implementation of the semantics; no C dependency);
+  econf-style lookup is recommended guidance for app authors.
+- **UAPI.8 (package metadata ELF notes)** — optional app-authoring guidance
+  only (`--package-metadata=` linker flag → crash attribution via
+  systemd-coredump); not part of the contracts.
 
 Base images are first-class in both contracts: independently signed DDIs
 (the base vouches for itself; an app never vouches for base content), a

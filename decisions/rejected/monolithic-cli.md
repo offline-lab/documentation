@@ -1,7 +1,15 @@
 # Rejected: Monolithic offline-lab CLI
 
-**Status:** Rejected — split into three separate tools
-**Replaced by:** `boxctl` (Bash), `appctl` (Go), `buildctl` (Go)
+**Status:** Rejected — split into three separate tools.
+**REVERSED 2026-07-05** for the Go tools by
+[ADR-0040](../adr/adr-0040-one-binary-legs-as-namespaces.md): all three
+technical premises below dissolved (the CGO conflict died with the pure-Go
+pipeline, ADR-0031; cross-compilation is trivial at `CGO_ENABLED=0`;
+Docker/portablectl are per-verb runtime deps, not binary deps). The Go
+tooling is now one binary with one namespace per leg. `boxctl` remains
+separate — that part of this rejection stands.
+**Replaced by:** `boxctl` (Bash), `appctl` (Go), `buildctl` (Go) *(the Go
+names are working titles for namespaces since ADR-0040)*
 
 ---
 

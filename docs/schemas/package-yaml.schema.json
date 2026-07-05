@@ -1,323 +1,121 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://offline-lab.com/schemas/package-yaml/v1",
-  "title": "Offline Lab package.yaml",
-  "description": "Build-time package definition. Written by the app author, read by buildctl, emitted as a DDI (UAPI.3 GPT image: root + verity + signature partitions). Supports dual runtime (portable default, or nspawn) and an optional rootfs/ skeleton merged over backend output. Fields not set here fall back to Docker image labels, then to defaults where applicable. See docs/specs/package-format.md and docs/specs/build.md.",
+  "title": "Offline Lab package.yaml (the manifest / DDI metadata)",
+  "description": "The app manifest, written by the app author. Embedded in the image at /usr/share/<name>/package.yaml and, since ADR-0038, the ONLY package metadata (the standalone metadata JSON is retired). Field semantics: docs/specs/app-contract.md. YAML only (package.json was dropped). The floor is four lines: name, version, arch, command (command may be omitted when the image ships its own service unit).",
+  "$comment": "Deliberately ABSENT, pending the T101 rulings (do not add without a decision): expose/ports, devices, resources, systemd_profile, network, volumes. Also removed by ruling: tags (freeform labels rejected, session §21), category (killed 2026-07-06, session §24 — no added value), strip (died with the old buildctl).",
   "type": "object",
-  "required": [
-    "spec_version",
-    "name",
-    "version",
-    "arch",
-    "description",
-    "publisher"
-  ],
+  "required": ["name", "version", "arch"],
   "additionalProperties": false,
   "properties": {
 
     "spec_version": {
       "type": "string",
-      "enum": ["1"],
-      "description": "Schema version. Always '1' for this version of the spec."
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "description": "Manifest format version, major.minor (session §24): minor = compatible additions, major = breaking changes. Current: '1.0'. Optional; defaults to '1.0'."
     },
 
     "name": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]*$",
-      "description": "Package name. Lowercase alphanumeric and hyphens only. Must start with alphanumeric."
+      "description": "App name: lowercase alphanumeric and hyphens, starts alphanumeric. Names the service unit, storage paths, and all lifecycle verbs."
     },
 
     "version": {
       "type": "string",
-      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
-      "description": "Package version. Must be valid semver."
+      "pattern": "^[A-Za-z0-9.~^-]+$",
+      "description": "The DDI version the author assigns (UAPI.10 Version Format: '~' pre-release sorts lower, '^' post-release sorts higher; compared like systemd-analyze compare-versions). NOT semver, and NOT the version of the software inside (deliberately untracked, session §21). Underscore is forbidden — it separates the filename fields <name>_<version>_<arch>.raw."
     },
 
     "arch": {
       "type": "string",
-      "enum": ["arm64", "armv7", "armv6", "amd64", "i386", "riscv64", "ppc64le", "s390x"],
-      "description": "Target architecture. Maps to a Docker platform string at build time (e.g. arm64 → linux/arm64, i386 → linux/386)."
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "Target architecture. An OPEN set (anyone who can build for an arch may ship it); the officially supported set is documented separately. Must have DPS partition type UUIDs and, for the docker backend, a platform mapping."
     },
 
-    "description": {
+    "command": {
       "type": "string",
-      "minLength": 1,
-      "description": "Single-line human-readable description."
-    },
-
-    "homepage": {
-      "type": "string",
-      "format": "uri",
-      "description": "Package or upstream project homepage URL."
-    },
-
-    "license": {
-      "type": "string",
-      "description": "SPDX license identifier (e.g. 'Apache-2.0', 'MIT', 'EPL-2.0')."
-    },
-
-    "tags": {
-      "type": "array",
-      "items": { "type": "string", "minLength": 1 },
-      "uniqueItems": true,
-      "description": "Classification tags used for repository search and filtering."
-    },
-
-    "publisher": {
-      "type": "string",
-      "minLength": 1,
-      "description": "Publisher organisation identifier."
-    },
-
-    "publisher_url": {
-      "type": "string",
-      "format": "uri",
-      "description": "Publisher homepage URL."
-    },
-
-    "maintainer": {
-      "type": "string",
-      "description": "Package maintainer. Format: 'Name <email>'."
-    },
-
-    "source_url": {
-      "type": "string",
-      "format": "uri",
-      "description": "Source repository URL."
-    },
-
-    "security_contact": {
-      "type": "string",
-      "description": "Email address or URL for vulnerability disclosure."
-    },
-
-    "sbom_url": {
-      "type": ["string", "null"],
-      "format": "uri",
-      "description": "URL to a published SBOM for this package. Null if not provided."
-    },
-
-    "backend": {
-      "type": "string",
-      "enum": ["docker", "shell", "make", "mkosi"],
-      "default": "docker",
-      "description": "Build backend used to produce the filesystem. 'docker' (default) uses docker buildx. See docs/specs/build.md."
-    },
-
-    "backend_arguments": {
-      "type": "object",
-      "description": "Backend-specific build arguments. Valid keys depend on the selected backend. Per-backend keys are defined when each backend is documented. See docs/specs/build.md.",
-      "additionalProperties": true
-    },
-
-    "systemd_profile": {
-      "type": "string",
-      "enum": ["default", "strict", "trusted", "nonetwork", "custom"],
-      "default": "strict",
-      "description": "systemd portable service security profile. Applies to portable runtime only. 'custom' shifts full security responsibility to the app author — flagged in appctl list and the repo index."
+      "pattern": "^/",
+      "description": "Absolute path to the service entrypoint. Used to generate a minimal <name>.service when the image ships no unit; a shipped unit always wins. If neither exists, the build fails — an app must be runnable."
     },
 
     "runtime": {
       "type": "string",
       "enum": ["portable", "nspawn"],
       "default": "portable",
-      "description": "Runtime mode. 'portable' (default) attaches the DDI as a systemd portable service with a per-app uid drop-in. 'nspawn' runs the DDI under systemd-nspawn with namespace isolation (no per-app uid)."
-    },
-
-    "network": {
-      "type": "string",
-      "enum": ["host", "private", "none"],
-      "default": "host",
-      "description": "Network mode. Only meaningful when runtime = 'nspawn'; ignored otherwise. 'host' shares the host network namespace, 'private' uses an isolated namespace, 'none' disables networking."
-    },
-
-    "command": {
-      "type": "string",
-      "description": "Absolute path to the service entrypoint inside the DDI root filesystem. Used to auto-generate the systemd service unit when no unit file is provided in rootfs/ or backend output. Ignored when a developer-provided unit is present."
+      "description": "Developer-declared runtime mode, baked into the app and travels with the image (ADR-0030/0011). portable = light, host-integrated (default); nspawn = isolated."
     },
 
     "socket_activation": {
       "type": "boolean",
       "default": false,
-      "description": "If true, the service uses socket activation. A .socket unit must exist inside the DDI root partition."
+      "description": "When true, `up` starts <name>.socket (which must exist in the image) instead of starting the service directly."
     },
 
-    "volumes": {
+    "backend": {
+      "type": "string",
+      "enum": ["docker", "mkosi", "shell"],
+      "description": "Build backend (build-time only; ADR-0031). Never guessed: declared here or passed as --backend. shell subsumes make."
+    },
+
+    "base": {
       "type": "object",
+      "description": "Lineage: the ONE base this app layers on (2 layers max, no language layer — session §20). Absent = fat app. Matching is UAPI.4 exact: the base's os-release ID + SYSEXT_LEVEL. ('stack:' is reserved for the future compose feature, T53.)",
+      "required": ["name", "sysext_level"],
       "additionalProperties": false,
       "properties": {
-        "config": {
+        "name": {
           "type": "string",
-          "description": "Namespace path for the config volume (e.g. /etc/mosquitto)."
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "description": "Base name (e.g. debian-base, debian-python — flat, complete bases)."
         },
-        "data": {
+        "sysext_level": {
           "type": "string",
-          "description": "Namespace path for the data volume (e.g. /var/lib/mosquitto)."
+          "pattern": "^[a-z0-9][a-z0-9._-]*$",
+          "description": "The base publisher's compatibility level (UAPI.4 SYSEXT_LEVEL; their ABI promise, e.g. '13' for Debian 13.x). Exact string match at attach."
         }
-      },
-      "description": "Persistent volume mappings. At most two keys: config and data. Apps log via stderr/stdout to the systemd journal — no log volume."
-    },
-
-    "ports": {
-      "type": "array",
-      "items": { "$ref": "#/definitions/port" },
-      "default": [],
-      "description": "Network ports the service listens on."
-    },
-
-    "devices": {
-      "type": "array",
-      "items": { "$ref": "#/definitions/device" },
-      "default": [],
-      "description": "Hardware devices the service requires or optionally uses."
-    },
-
-    "resources": {
-      "$ref": "#/definitions/resources",
-      "description": "Expected resource usage at three load levels. Optional — if absent, appctl skips the resource check with a warning."
+      }
     },
 
     "lifecycle": {
-      "$ref": "#/definitions/lifecycle",
-      "description": "Lifecycle hook unit names. Omit the entire block if the app has no hooks. If present, each defined key must be a non-empty unit name string."
+      "type": "object",
+      "description": "Hook stages (ADR-0016 as amended, session §18): each stage is an ORDERED LIST of unit names that exist inside the image. Present only when hooks exist — no null/empty forms. Hooks fire every time their stage fires; one-time behavior via the unit's own Condition* guards. pre_upgrade/post_upgrade are reserved for the upgrade design (T103).",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "pre_start":  { "$ref": "#/definitions/hook_list" },
+        "post_start": { "$ref": "#/definitions/hook_list" },
+        "pre_stop":   { "$ref": "#/definitions/hook_list" },
+        "post_stop":  { "$ref": "#/definitions/hook_list" },
+        "pre_drop":   { "$ref": "#/definitions/hook_list" }
+      }
     },
 
-    "strip": {
-      "$ref": "#/definitions/strip",
-      "description": "Binary stripping configuration. Build-time only — not included in the generated metadata JSON."
-    }
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Single-line human-readable description. Projected into index catalogs as the offline-search text (session §21). Catalog hygiene: enforced at `index add`, not at build."
+    },
 
+    "homepage":         { "type": "string", "format": "uri", "description": "Upstream/project homepage." },
+    "license":          { "type": "string", "description": "SPDX license identifier (e.g. 'Apache-2.0')." },
+    "publisher":        { "type": "string", "description": "Publisher organisation. Catalog hygiene: index holders may require it at `index add`." },
+    "publisher_url":    { "type": "string", "format": "uri", "description": "Publisher homepage." },
+    "maintainer":       { "type": "string", "description": "Package maintainer, 'Name <email>'." },
+    "source_url":       { "type": "string", "format": "uri", "description": "Source repository URL." },
+    "security_contact": { "type": "string", "description": "Email or URL for vulnerability reports." },
+    "sbom_url":         { "type": "string", "format": "uri", "description": "URL to a published SBOM. Related: T106 (inner-software-version visibility) — kept as an optional pointer meanwhile." }
   },
 
   "definitions": {
-
-    "port": {
-      "type": "object",
-      "required": ["port", "protocol", "expose"],
-      "additionalProperties": false,
-      "properties": {
-        "port": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 65535
-        },
-        "protocol": {
-          "type": "string",
-          "enum": ["tcp", "udp"]
-        },
-        "description": {
-          "type": "string"
-        },
-        "expose": {
-          "type": "boolean",
-          "description": "If true, an nftables accept rule is applied for this port on install."
-        }
-      }
-    },
-
-    "device": {
-      "type": "object",
-      "required": ["type", "required"],
-      "additionalProperties": false,
-      "properties": {
-        "type": {
-          "type": "string",
-          "enum": ["audio", "video", "bluetooth", "gpio", "i2c", "spi", "serial", "usb"]
-        },
-        "required": {
-          "type": "boolean",
-          "description": "If false, the service starts even if the device is absent."
-        },
-        "description": {
-          "type": "string"
-        }
-      }
-    },
-
-    "resources": {
-      "type": "object",
-      "required": ["low", "moderate", "heavy"],
-      "additionalProperties": false,
-      "properties": {
-        "low":      { "$ref": "#/definitions/resource_level" },
-        "moderate": { "$ref": "#/definitions/resource_level" },
-        "heavy":    { "$ref": "#/definitions/resource_level" }
-      }
-    },
-
-    "resource_level": {
-      "type": "object",
-      "required": ["cpu_percent", "memory_mb", "storage_mb"],
-      "additionalProperties": false,
-      "properties": {
-        "cpu_percent": {
-          "type": "number",
-          "minimum": 0,
-          "description": "Sustained CPU usage as a percentage of one core."
-        },
-        "memory_mb": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "RSS memory in MB."
-        },
-        "storage_mb": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Disk space in MB (squashfs + data dir combined)."
-        }
-      }
-    },
-
-    "lifecycle": {
-      "type": "object",
-      "additionalProperties": false,
-      "minProperties": 1,
-      "properties": {
-        "pre_start": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Unit name to run after portablectl attach, before enable and first start."
-        },
-        "post_start": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Unit name to run after the service is running for the first time."
-        },
-        "pre_update": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Unit name to run after new image is attached, before service restart."
-        },
-        "post_update": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Unit name to run after the service is running on the new image."
-        },
-        "pre_remove": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Unit name to run before the service is stopped and the image is detached."
-        }
-      }
-    },
-
-    "strip": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "default": false,
-          "description": "If true, unused shared libraries are removed after build. Libraries loaded via dlopen are invisible to ldd — declare them in keep[]."
-        },
-        "keep": {
-          "type": "array",
-          "items": { "type": "string", "minLength": 1 },
-          "default": [],
-          "description": "Paths inside the rootfs to preserve during stripping."
-        }
+    "hook_list": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9:_.\\\\@-]+\\.(service|socket|target|timer|path|mount|automount)$",
+        "description": "A systemd unit name that exists inside the image. Units run in list order; the next starts only after the previous succeeded."
       }
     }
-
   }
 }

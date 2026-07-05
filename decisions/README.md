@@ -74,6 +74,10 @@ original discussion.
 | [0034](adr/adr-0034-uapi-substrate.md) | UAPI.3/.4/.10 adopted verbatim as the format substrate |
 | [0035](adr/adr-0035-standardized-app-storage.md) | Standardized relocatable app storage + private /tmp |
 | [0036](adr/adr-0036-foreign-host-baseline.md) | Foreign-host baseline; doctor + recover; OL-OS specifics move OS-side |
+| [0037](adr/adr-0037-ddis-carry-trust-indexes-carry-discovery.md) | DDIs carry trust; indexes carry discovery — subscribe + import |
+| [0038](adr/adr-0038-single-file-package.md) | Single-file package: metadata lives inside the DDI |
+| [0039](adr/adr-0039-one-tool-per-leg.md) | One tool per leg: build / distribute / run *(amended by 0040: legs are namespaces, not binaries)* |
+| [0040](adr/adr-0040-one-binary-legs-as-namespaces.md) | One binary, one name (parked); the legs become namespaces |
 
 ### Design notes (`design/`)
 

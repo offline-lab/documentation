@@ -1,200 +1,150 @@
 # App Lifecycle Hooks
 
-> **Amended (2026-07-05).** The appctl verb model was redesigned in
-> [ADR-0032](https://github.com/offline-lab/documentation/blob/main/decisions/adr/adr-0032-appctl-lifecycle-verbs.md):
-> the install/update/remove vocabulary below maps onto the two-axis model
-> (`get`/`rm` cache, `up`/`down` run, `drop` guarded teardown). The *hook
-> concept* (units run at defined lifecycle points) survives; the flow names and
-> semantics they attach to await the rewrite. appctl remains unwritten.
+**Status:** rewritten 2026-07-05 against the session-§18 hook redesign,
+ADR-0016 (as amended) and ADR-0032 (T98). Upgrade stages await the upgrade
+design (T103).
 
-Apps can declare systemd units that appctl starts at defined points in the install,
-update, and remove flow. Hooks are the correct place for one-time operations that
-cannot be expressed as regular service dependencies: database init, config migration,
-pre-removal export.
-
-For recurring setup on every start (first-run guards, dependency checks), the preferred
-pattern is a `oneshot` unit wired as a systemd dependency inside the squashfs, using
-`ConditionPathExists=` to skip subsequent runs. See the example below.
+Hooks let an app run its own units at defined lifecycle points, started by
+the runtime — portablectl/nspawn only make units *available*, so this
+mechanism is the runtime's own. Hooks exist so developers get **systemd's
+error handling instead of bash glue**: copy files, run migrations, prepare
+or chown sockets, start side software that lives in the same image (a worker
+beside a webservice). If an app needs fifteen jobs before the main task,
+that is the developer's choice — the mechanism supports it.
 
 ---
 
-## Hook types
+## The model
 
-| Hook | When it runs |
-|---|---|
-| `pre_start` | After portablectl attach, before the service is enabled and started |
-| `post_start` | After the service is running for the first time |
-| `pre_update` | After the new image is attached, before the service is restarted |
-| `post_update` | After the service is running on the new image |
-| `pre_remove` | Before the service is stopped and the image is detached |
+- **Each stage is an ordered list of unit files** that exist inside the
+  image, referenced from `package.yaml`. Units run in list order; the next
+  starts only after the previous succeeded.
+- **Hooks fire every time their stage fires.** One-time behavior is the
+  unit's own business via condition guards (`ConditionPathExists=` etc.) —
+  there is no first-run magic in the runtime.
+- **`recover` replays hooks like a normal `up`.** The condition guards make
+  that safe; this is why storage mounts must be in place before recover
+  runs (OS-side ordering).
+- **A failing pre-stage hook aborts its verb loudly; `--force` skips.**
+  Stricter than the pre-pivot spec (which ignored `pre_remove` failures) —
+  consistent with the guarded-force grammar of ADR-0032.
 
-There is no `post_remove`. By the time removal is complete, the image is detached
-and no hook execution environment exists.
+## Stages
 
----
+| Stage | Fires | Typical use |
+|---|---|---|
+| `pre_start` | every `up`, before the service starts | copy defaults into the rw config mount, migrations (guarded), socket prep |
+| `post_start` | every `up`, after the service is running | start side software from the same image, warmup |
+| `pre_stop` | every `down`, before the service stops | flush, stop side pieces, export |
+| `post_stop` | every `down`, after the service stopped | cleanup of runtime artifacts |
+| `pre_drop` | before the guarded total teardown | final export/backup — the last chance before data is destroyed |
+| `pre_upgrade` / `post_upgrade` | around a version switch | **defined by the upgrade design (T103)** |
+
+There are no `rm` hooks (`rm` only removes a cached image — no execution
+environment is touched) and no post-drop hook (nothing remains to run in).
 
 ## Declaration
 
-Hooks are declared in `package.yaml` as unit names that must exist inside the squashfs:
-
 ```yaml
 lifecycle:
-  pre_start:  mosquitto-pre-start.service
-  post_start: mosquitto-post-start.service
-  pre_update: mosquitto-pre-update.service
-  post_update: mosquitto-post-update.service
-  pre_remove: mosquitto-pre-remove.service
+  pre_start:
+    - myapp-seed-config.service
+    - myapp-migrate.service
+  post_start:
+    - myapp-worker.service
+  pre_drop:
+    - myapp-export.service
 ```
 
-All hooks are optional. Omit any hook the app does not need.
-
-Units must exist at the declared name inside the squashfs. buildctl validates this
-at package build time.
-
----
+Every value is a list, ordered. All stages optional. Per ADR-0016: the
+`lifecycle:` block is **present only when hooks exist** — no null/empty
+forms. The build tool validates that every referenced unit exists in the
+image (conformance rule; T104 validates the units themselves).
 
 ## Execution
 
-appctl invokes hooks via `systemctl start <unit>`. The unit file lives inside the
-squashfs; portablectl has already attached it to the system before any hook runs.
+The runtime starts hook units via `systemctl start`, in list order, after
+the image is attached (so hook units are available and run in the app's
+namespace: same image, same storage binds, same allocated user — placement
+comes from the same generated drop-in as the main service).
 
-Hooks run as the app's allocated user (`app<uid>`) with the app's data volumes
-bind-mounted, with the same context as the main service, except they are started directly
-by appctl rather than being part of the service's normal lifecycle.
+**Environment:** each hook receives
 
-appctl provides environment variables to each hook via a transient drop-in written
-to `/run/systemd/system.control/` before starting the unit, and removed after.
+| Variable | Value |
+|---|---|
+| `APP_NAME` | app name |
+| `APP_VERSION` | DDI version being operated on |
+| `APP_CONFIG_DIR` | in-namespace config path (`/etc/<name>`) |
+| `APP_DATA_DIR` | in-namespace data path (`/var/lib/<name>`) |
 
----
-
-## Environment variables
-
-| Variable | Value | Available in |
-|---|---|---|
-| `APP_NAME` | App name (e.g. `mosquitto`) | all hooks |
-| `APP_VERSION` | Version being installed, updated, or removed | all hooks |
-| `APP_PREV_VERSION` | Previous installed version | `pre_update`, `post_update` |
-| `APP_FIRST_RUN` | `1` on first install, unset on reinstall/update | `pre_start`, `post_start` |
-| `APP_DATA_DIR` | Namespace path of the data volume | all hooks |
-| `APP_CONFIG_DIR` | Namespace path of the config volume | all hooks |
-
-`APP_FIRST_RUN=1` is set when there is no prior install record for this app in
-`state/packages/`. Use it to distinguish first-install init from reinstall in `pre_start`.
-
----
+Dropped from the pre-pivot set: `APP_FIRST_RUN` (condition guards replace
+it) and `APP_PREV_VERSION` (belongs to the T103 upgrade stages).
 
 ## Sequencing
 
-### Install
+### `up`
 
 ```
-1. Stage DDI to /var/lib/appctl/images/<uuid>/
-2. Allocate uid, write sysusers snippet, call systemd-sysusers
-3. Create /var/lib/appctl/apps/<repo-hash>/<name>/{config,data}/
-4. Seed config from DDI defaults (first install only)
-5. Generate appctl drop-in (User=, Group=, BindPaths=)
-6. portablectl attach (systemd verifies signature via /etc/verity.d/)
-pre_start                              [APP_FIRST_RUN=1 on first install]
-7. portablectl enable + systemctl start <name>.service
-post_start                             [APP_FIRST_RUN=1 on first install]
-8. Write package record to state/packages/<hash>-<name>.json
+1. systemd verifies the image (up-gate: signature + verity, every start)
+2. first provision only: allocate uid/gid, create config+data dirs,
+   seed config from /usr/share/factory/etc/<name>/ (app contract §4)
+3. attach (portablectl / nspawn), write the placement drop-in
+pre_start hooks, in order          [failure → abort up, detach; --force skips]
+4. enable + start <name>.service (or .socket)
+post_start hooks, in order         [failure → service stays up, loud warning]
+5. record desired state (recover's source of truth)
 ```
 
-### Update
+### `down`
 
 ```
-1. Stage new DDI to /var/lib/appctl/images/<uuid-new>/
-2. systemctl stop <name>.service
-3. portablectl detach <old>
-4. portablectl attach <new> (systemd verifies signature via /etc/verity.d/)
-5. Regenerate appctl drop-in from new metadata
-pre_update                             [APP_PREV_VERSION=<old>]
-6. systemctl start <name>.service
-post_update
-7. Update package record (new uuid active, old uuid retained per retention policy)
-8. Prune images beyond retention limit
+pre_stop hooks, in order           [failure → abort down; --force skips]
+1. stop the service
+post_stop hooks, in order          [failure → loud warning]
+2. record desired state
 ```
 
-### Remove
+### `drop`
 
 ```
-pre_remove                             [service still running]
-1. systemctl stop <name>.service
-2. portablectl detach
-3. Delete sysusers snippet
-4. Mark package record as removed in state/packages/<hash>-<name>.json
-[--purge: delete /var/lib/appctl/apps/<repo-hash>/<name>/]
+0. refuse if running ("down it first") and demand the destructive guards
+pre_drop hooks, in order           [failure → abort drop; --force skips]
+1. teardown: detach, remove environment (uid/gid, config, dirs) and data
 ```
 
----
+### `recover`
 
-## Image storage and rollback
+Replays the recorded desired state as normal `up`s — including hooks, whose
+condition guards make the replay idempotent.
 
-Each staged image lives in its own UUID-named directory under `/var/lib/appctl/images/`:
+## Systemd-wired oneshots (preferred for pure ordering)
 
-```
-/var/lib/appctl/images/<uuid>/
-  mosquitto_2.0.18_arm64.raw
-  mosquitto_2.0.18_arm64.json
-```
-
-The per-image record at `state/images/<uuid>.json` maps each UUID to its app,
-version, and status (`active` | `previous` | `removed`). The DDI is a single
-`.raw` file with partitions discovered by GPT type UUID, not by filename
-convention.
-
-**Retention:** after each successful install or update, appctl prunes images for that
-app beyond the configured limit (default: 3). The active image is always retained.
-Retained previous images enable rollback via `appctl rollback <name>`.
-
-The retention limit is configurable in `/etc/appctl/appctl.conf`:
-```
-image_retention = 3
-```
-
----
-
-## Failure behaviour
-
-| Hook | Failure behaviour |
-|---|---|
-| `pre_start` | Abort install; portablectl detach; no service started |
-| `post_start` | Service left running; operator must intervene |
-| `pre_update` | Abort update; re-attach old image; restart old version |
-| `post_update` | New version running; operator must intervene |
-| `pre_remove` | Remove proceeds anyway; hook failure is logged but not blocking |
-
-`pre_remove` failure is non-blocking because a hook that always fails would make
-the app impossible to remove.
-
-All hook failures are logged to the journal under the appctl unit.
-
----
-
-## Systemd-wired lifecycle (preferred for migrations)
-
-For database migrations and first-run guards, the preferred pattern is a `oneshot`
-unit wired as a systemd dependency inside the squashfs:
+Anything that only needs *ordering relative to the service* — no runtime
+involvement — should be a unit dependency inside the image, not a hook:
 
 ```ini
-# mosquitto-migrate.service (inside squashfs)
+# myapp-migrate.service (inside the image)
 [Unit]
-Description=Mosquitto data migration
-Before=mosquitto.service
-ConditionPathExists=!/var/lib/mosquitto/.migrated-2.0.18
+Description=Data migration
+Before=myapp.service
+ConditionPathExists=!/var/lib/myapp/.migrated-2.0.18
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/lib/mosquitto/migrate.sh
-ExecStartPost=/usr/bin/touch /var/lib/mosquitto/.migrated-2.0.18
+ExecStart=/usr/lib/myapp/migrate.sh
+ExecStartPost=/usr/bin/touch /var/lib/myapp/.migrated-2.0.18
 ```
 
-The `ConditionPathExists` guard prevents re-running on every start. Unit files inside
-the squashfs only see namespace paths (e.g. `/var/lib/mosquitto`). System paths
-containing the repo hash are invisible to the service and must not appear in unit files
-or scripts. This pattern requires no appctl involvement; systemd handles ordering and
-execution.
+Unit files see only in-namespace paths (`/var/lib/myapp` — UAPI.9 view);
+host paths must never appear in units. No `User=`/`Group=` (ADR-0015) —
+placement is the drop-in's job.
 
-`User=` and `Group=` are not declared in the unit file; appctl provides them via
-the same drop-in it generates for the main service.
+## Image retention and revert
+
+Retention of cached versions is local policy (user-configurable, default
+current + previous) and revert is an on-disk operation — see the
+[Index contract](index-contract.md) and ADR-0032. How retained versions are
+stored on the host (pre-pivot ADR-0020 uuid-keyed dirs vs. the index-layout
+`<name>/<version>/` shape of the local collection) is **reconciled in the
+upgrade design (T103)**.

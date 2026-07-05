@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted — amended by ADR-0034 (2026-07-05): UAPI.4 adopted verbatim (SYSEXT_SCOPE=portable, no `_any`); 3-layer cap affirmed as an artificial complexity guard; build-side flows affected by ADR-0031 |
+| **Status** | Accepted — amended by ADR-0034 (2026-07-05): UAPI.4 adopted verbatim (SYSEXT_SCOPE=portable, no `_any`); build-side flows affected by ADR-0031. Further amended (session §20, 2026-07-05): the intermediate language layer is **removed** — cap is **base + app**; language flavors are flat bases |
 | **Date** | 2026-06-18 |
 | **Deciders** | Offline Lab core team |
 | **Supersedes** | None |
