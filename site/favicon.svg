@@ -1,0 +1,27 @@
+<svg viewBox="-135 -150 270 270" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f97316"/>
+      <stop offset="100%" stop-color="#fbbf24"/>
+    </linearGradient>
+  </defs>
+  <rect x="-135" y="-150" width="270" height="270" rx="27" ry="27" stroke="url(#g)" stroke-width="12"/>
+  <g stroke="url(#g)" stroke-width="12" stroke-linecap="round">
+    <path d="M-54,-63 A90,90 0 0,1 54,-63"/>
+    <path d="M-36,-42 A60,60 0 0,1 36,-42"/>
+    <path d="M-18,-24 A33,33 0 0,1 18,-24"/>
+    <line x1="-69" y1="-78" x2="69" y2="6"/>
+  </g>
+  <circle cx="0" cy="-9" r="9" fill="url(#g)"/>
+  <g transform="translate(0, 48)" stroke="url(#g)" stroke-linecap="round">
+    <rect x="-33" y="-33" width="66" height="66" rx="7.5" ry="7.5" stroke-width="9"/>
+    <g stroke-width="7">
+      <line x1="-15" y1="-33" x2="-15" y2="-45"/><line x1="0" y1="-33" x2="0" y2="-45"/>
+      <line x1="15" y1="-33" x2="15" y2="-45"/><line x1="-15" y1="33" x2="-15" y2="45"/>
+      <line x1="0" y1="33" x2="0" y2="45"/><line x1="15" y1="33" x2="15" y2="45"/>
+      <line x1="-33" y1="-15" x2="-45" y2="-15"/><line x1="-33" y1="0" x2="-45" y2="0"/>
+      <line x1="-33" y1="15" x2="-45" y2="15"/><line x1="33" y1="-15" x2="45" y2="-15"/>
+      <line x1="33" y1="0" x2="45" y2="0"/><line x1="33" y1="15" x2="45" y2="15"/>
+    </g>
+  </g>
+</svg>
