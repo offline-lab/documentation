@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Offline Lab</title>
-  <meta name="description" content="Offline Lab is a small, independent lab in Europe building open-source software that keeps working when the network doesn't." />
+  <meta name="description" content="Offline Lab is a small team in Europe making open-source software that runs without an internet connection." />
   <meta name="theme-color" content="#07101f" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -173,6 +173,7 @@
       font-weight: 700;
       line-height: 1.05;
       letter-spacing: -0.035em;
+      text-wrap: balance;
       margin-bottom: 1.75rem;
       animation: rise 0.9s 0.2s ease-out both;
     }
@@ -188,29 +189,10 @@
       font-size: 1.08rem;
       color: var(--fg-muted);
       line-height: 1.75;
-      max-width: 520px;
+      max-width: 540px;
+      text-wrap: balance;
       margin-bottom: 2.75rem;
       animation: rise 0.9s 0.3s ease-out both;
-    }
-
-    .tenets {
-      list-style: none;
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: 0.6rem;
-      margin-bottom: 3rem;
-      animation: rise 0.9s 0.4s ease-out both;
-    }
-    .tenets li {
-      font-family: var(--font-mono);
-      font-size: 0.74rem;
-      color: var(--fg-muted);
-      border: 1px solid var(--border-strong);
-      border-radius: 100px;
-      padding: 0.35rem 0.9rem;
-      background: color-mix(in srgb, var(--bg-card) 60%, transparent);
-      backdrop-filter: blur(6px);
     }
 
     .contact {
@@ -226,7 +208,7 @@
       background: var(--accent-muted);
       border-radius: var(--radius-sm);
       transition: color var(--transition), border-color var(--transition), transform var(--transition);
-      animation: rise 0.9s 0.5s ease-out both;
+      animation: rise 0.9s 0.4s ease-out both;
     }
     .contact:hover { color: var(--accent-hover); border-color: var(--accent); transform: translateY(-1px); }
     .contact svg { width: 15px; height: 15px; }
@@ -305,20 +287,12 @@
 
       <div class="wordmark">Offline<span>·</span>Lab</div>
 
-      <h1>Software for when<br><em>the network isn't there.</em></h1>
+      <h1>Software for when<br><em>the network isn't&nbsp;there.</em></h1>
 
       <p class="lede">
-        We're a small, independent lab in Europe building open-source tools
-        that run on your own hardware and keep working when the connection
-        doesn't. No cloud, no accounts, no strings.
+        Offline Lab is a small team in Europe. We make open-source software
+        that runs on your own hardware, without an internet connection.
       </p>
-
-      <ul class="tenets">
-        <li>local-first</li>
-        <li>open source</li>
-        <li>low power</li>
-        <li>built to last</li>
-      </ul>
 
       <a class="contact" href="mailto:info@offline-lab.com">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
